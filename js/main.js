@@ -76,6 +76,14 @@
     const c = (G.CHARACTERS || []).find((c) => c.id === id);
     return c ? c.name : id;
   }
+  function cssColor(c) {
+    if (typeof c === 'number') return '#' + c.toString(16).padStart(6, '0');
+    return c || '#888';
+  }
+  function kartColor(id) {
+    const d = kartDef(id);
+    return cssColor(d && d.color);
+  }
   function kartDef(id) {
     return (G.KARTS || []).find((k) => k.id === id);
   }
@@ -455,6 +463,11 @@
     }
   }
 
+  // test hook: advance the simulation n fixed steps without rendering
+  Game.debugAdvance = function (n) {
+    for (let i = 0; i < n; i++) step();
+  };
+
   function pauseGame() {
     const prev = Game.state;
     setState('paused');
@@ -486,11 +499,10 @@
     const rows = sorted.map((k, i) => {
       const pts = gp ? GP_POINTS[i] || 0 : 0;
       if (gp) k.entrant.total += pts;
-      const def = kartDef(k.entrant.kart);
       return {
         pos: i + 1,
         name: teamName(k.entrant),
-        kartColor: def ? def.color : '#888',
+        kartColor: kartColor(k.entrant.kart),
         time: fmtTime(k.finishTime),
         points: pts,
         total: k.entrant.total,
@@ -511,16 +523,13 @@
         const standRows = Game.standings
           .slice()
           .sort((a, b) => b.total - a.total)
-          .map((e, i) => {
-            const def = kartDef(e.kart);
-            return { pos: i + 1, name: teamName(e), kartColor: def ? def.color : '#888', time: '', points: 0, total: e.total, isPlayer: !!e.isPlayer };
-          });
+          .map((e, i) => ({ pos: i + 1, name: teamName(e), kartColor: kartColor(e.kart), time: '', points: null, total: e.total, isPlayer: !!e.isPlayer }));
         G.HUD.showResults(standRows, { title: (Game.cupName || 'Cup') + ' Standings', showPoints: true, gp: true, standings: true }, () => startCurrentRace());
       } else if (gp) {
         const standings = Game.standings
           .slice()
           .sort((a, b) => b.total - a.total)
-          .map((e, i) => ({ pos: i + 1, name: teamName(e), total: e.total, isPlayer: !!e.isPlayer, front: e.front, rear: e.rear, kartColor: (kartDef(e.kart) || {}).color }));
+          .map((e, i) => ({ pos: i + 1, name: teamName(e), total: e.total, isPlayer: !!e.isPlayer, front: e.front, rear: e.rear, kartColor: kartColor(e.kart) }));
         G.UI.showGPFinal(standings, () => Game.quitToTitle());
       } else {
         Game.quitToTitle();
@@ -674,8 +683,8 @@
       let d = dots[i];
       if (!d) d = dots[i] = { x: 0, z: 0, color: '#fff', isPlayer: false };
       d.x = k.pos.x; d.z = k.pos.z;
-      const def = kartDef(k.entrant.kart);
-      d.color = def ? def.color : '#fff';
+      if (!k._cssColor) k._cssColor = kartColor(k.entrant.kart);
+      d.color = k._cssColor;
       d.isPlayer = k === p;
     }
     dots.length = Game.karts.length;
@@ -699,6 +708,7 @@
   // ---------------------------------------------------------------- main loop
   let last = performance.now();
   let acc = 0;
+  Game.perf = { step: 0, render: 0 };
   let fpsFrames = 0, fpsTime = 0, slowTime = 0, fastTime = 0;
 
   function frame(now) {
@@ -711,7 +721,9 @@
     // small tolerance so a 59.9 Hz display still steps every frame
     while (acc >= STEP * 0.96 && steps < 5) {
       try {
+        const t0 = performance.now();
         step();
+        Game.perf.step = G.lerp(Game.perf.step, performance.now() - t0, 0.05);
       } catch (err) {
         console.error(err);
       }
@@ -729,7 +741,9 @@
     } catch (err) {
       console.error(err);
     }
+    const r0 = performance.now();
     renderer.render(scene, camera);
+    Game.perf.render = G.lerp(Game.perf.render, performance.now() - r0, 0.05);
 
     // perf monitor + adaptive resolution to hold 60 fps
     fpsFrames++;
@@ -749,7 +763,7 @@
     }
     if (fpsTime >= 0.5) {
       if (fpsEl.style.display !== 'none') {
-        fpsEl.textContent = Math.round(fpsFrames / fpsTime) + ' fps · ' + renderer.info.render.calls + ' draws · x' + pixelRatio.toFixed(2);
+        fpsEl.textContent = Math.round(fpsFrames / fpsTime) + ' fps · ' + renderer.info.render.calls + ' draws · x' + pixelRatio.toFixed(2) + ' · sim ' + Game.perf.step.toFixed(2) + 'ms · gl ' + Game.perf.render.toFixed(2) + 'ms';
       }
       fpsFrames = 0;
       fpsTime = 0;

@@ -183,7 +183,7 @@
     // ------------------------------------------------------------ assets
     _track(o) { this._disposables.push(o); return o; }
     _mat(color, opts) {
-      const p = Object.assign({ color: color, flatShading: true }, opts || {});
+      const p = Object.assign({ color: color }, opts || {});
       return this._track(new THREE.MeshLambertMaterial(p));
     }
     _basic(color, opts) {

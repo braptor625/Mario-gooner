@@ -565,7 +565,7 @@
           this._endDrift(false);
         } else {
           const rel = steer * this.driftDir;
-          this.driftCharge += dt * 0.5;
+          this.driftCharge += dt * 0.8;
           if (this._flick === 0 && rel < -0.5) this._flick = 1;
           else if (this._flick === 1 && rel > 0.2) { this._flick = 0; this.driftCharge += 0.5; }
           this.driftLevel = this.driftCharge >= L2_CHARGE ? 2 : this.driftCharge >= L1_CHARGE ? 1 : 0;
