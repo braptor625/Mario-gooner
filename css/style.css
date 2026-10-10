@@ -278,8 +278,8 @@ kbd {
 .thumb::after { content: ""; position: absolute; left: 18%; right: 18%; bottom: 14%; height: 22%; background: #5a5a6e; border: .15rem solid var(--ink); border-radius: 50%; transform: perspective(14rem) rotateX(62deg); opacity: .95; box-shadow: inset 0 0 0 .2rem rgba(255,255,255,.35); }
 .thumb.mini::after { display: none; }
 .thumb.unk { background: repeating-linear-gradient(45deg, var(--grape) 0 .8rem, var(--ink) .8rem 1.6rem); }
-.track-grid { display: flex; gap: 2.4rem; margin: auto; justify-content: center; align-items: center; flex-wrap: wrap; max-width: 98rem; align-self: center; }
-.track-card { width: 21rem; }
+.track-grid { display: flex; gap: 2.2rem; margin: auto; justify-content: center; align-items: center; flex-wrap: nowrap; max-width: 98rem; align-self: center; }
+.track-card { width: 19.5rem; }
 .track-card .in { padding: 1rem 1rem 1.2rem; }
 .track-card .thumb { height: 12rem; margin-bottom: .8rem; }
 .track-card .nm { font: 400 1.7rem/1.05 var(--f-disp); }
