@@ -44,7 +44,7 @@ kbd {
   display: inline-block; min-width: 1.9rem; padding: .15rem .55rem .2rem; margin: 0 .15rem;
   font: 900 .95rem/1.2 var(--f-body); text-align: center; color: var(--ink);
   background: var(--cream); border: .16rem solid var(--ink); border-radius: .4rem;
-  box-shadow: 0 .2rem 0 var(--ink);
+  box-shadow: 0 .2rem 0 var(--ink); text-shadow: none; -webkit-text-stroke: 0; letter-spacing: 0;
 }
 
 /* ---------- menu backdrop ---------- */
@@ -291,7 +291,7 @@ kbd {
 .cup-card .thumb { flex: 1; height: 5.6rem; }
 .cup-card .nm { font: 400 2.1rem/1 var(--f-disp); }
 .cup-card .sub { margin-top: .5rem; font: 900 .9rem var(--f-body); letter-spacing: .1rem; text-transform: uppercase; opacity: .75; }
-.cup-card .cupico { position: absolute; top: -2.4rem; right: -1.4rem; width: 5.5rem; transform: rotate(10deg) skew(4deg); filter: drop-shadow(.25rem .25rem 0 var(--ink)); }
+.cup-card .cupico { position: absolute; top: -3.4rem; right: -1.8rem; width: 5.5rem; transform: rotate(10deg) skew(4deg); filter: drop-shadow(.25rem .25rem 0 var(--ink)); }
 
 /* ==========================================================
    HUD
@@ -357,7 +357,7 @@ kbd {
 .pos .n { font-size: 13rem; color: var(--pc); -webkit-text-stroke: .7rem var(--ink); paint-order: stroke fill; text-shadow: .7rem .7rem 0 var(--ink); font-style: italic; transform: skew(-6deg); display: block; padding-right: .3rem; }
 .pos .s { font-size: 4rem; margin-top: .6rem; color: var(--pc); -webkit-text-stroke: .4rem var(--ink); paint-order: stroke fill; text-shadow: .4rem .4rem 0 var(--ink); }
 .pos[data-p="1"] { --pc: var(--gold); } .pos[data-p="2"] { --pc: var(--silver); } .pos[data-p="3"] { --pc: var(--bronze); } .pos[data-p="4"] { --pc: #b58cff; }
-.pos .of { position: absolute; left: .4rem; bottom: -2.1rem; font: 900 1.1rem var(--f-body); color: var(--cream); letter-spacing: .15rem; text-shadow: .12rem .12rem 0 var(--ink); }
+.pos .of { position: absolute; right: .3rem; top: 5.6rem; font: 900 1.1rem var(--f-body); color: var(--cream); letter-spacing: .15rem; text-shadow: .12rem .12rem 0 var(--ink); }
 
 .hud-bl { left: 2.4rem; bottom: 2rem; }
 .mini-wrap { position: relative; width: 16.5rem; height: 16.5rem; border: var(--bw) solid var(--ink); border-radius: 2.6rem 1rem 2.6rem 1rem; background: rgba(255,246,224,.78); box-shadow: var(--sh) var(--sh) 0 var(--ink); overflow: hidden; }
@@ -378,7 +378,7 @@ kbd {
 .banner.info span { background: var(--ink); color: var(--cream); -webkit-text-stroke: 0; text-shadow: none; font-size: 3.4rem; border-color: var(--cream); }
 .banner::before, .banner::after { content: ""; position: absolute; top: 50%; width: 8rem; height: 4rem; margin-top: -2rem; background: repeating-linear-gradient(0deg, var(--cream) 0 .5rem, transparent .5rem 1.2rem); opacity: .0; }
 .wrong {
-  position: absolute; top: 38%; opacity: 0; transform: scale(.8); transition: opacity .12s; font: 400 5rem var(--f-disp); color: var(--cream); background: #e0264b; padding: .5rem 3rem .7rem;
+  position: absolute; top: 47%; opacity: 0; transform: scale(.8); transition: opacity .12s; font: 400 5rem var(--f-disp); color: var(--cream); background: #e0264b; padding: .5rem 3rem .7rem;
   border: .4rem solid var(--ink); box-shadow: .8rem .8rem 0 var(--ink); transform: skew(-8deg); letter-spacing: .15rem; display: flex; align-items: center; gap: 1.5rem;
   -webkit-text-stroke: .25rem var(--ink); paint-order: stroke fill; text-shadow: .25rem .25rem 0 var(--ink);
 }
