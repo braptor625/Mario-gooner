@@ -116,6 +116,7 @@
       this.lastDist = 0;
       this.raceDist = 0;
       this.lastGoodDist = 0;
+      this.lastGoodY = 0;
       this._progressInit = false;
       this.finished = false;
       this.finishTime = 0;
