@@ -259,6 +259,7 @@
   // ---------------------------------------------------------------- race setup
   function clearRace() {
     if (Game.items) { if (Game.items.dispose) Game.items.dispose(); Game.items = null; }
+    if (Game.battle && Game.battle.dispose) { Game.battle.dispose(); Game.battle = null; }
     if (Game.ghostPlayer) { Game.ghostPlayer.dispose && Game.ghostPlayer.dispose(); Game.ghostPlayer = null; }
     Game.ghostRec = null;
     for (const k of Game.karts) {
@@ -269,6 +270,7 @@
     Game.ais = [];
     Game.humans = [];
     Game.player = null;
+    if (Game.battle && Game.battle.dispose) Game.battle.dispose();
     Game.battle = null;
     if (Game.track) { Game.track.dispose(); Game.track = null; }
     for (let i = scene.children.length - 1; i >= 0; i--) scene.remove(scene.children[i]);
@@ -543,6 +545,7 @@
   }
 
   function viewOf(kart) {
+    if (!kart) return null;
     for (const v of views) if (v.kart === kart) return v;
     return null;
   }

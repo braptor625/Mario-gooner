@@ -455,9 +455,9 @@
     const el = screenEl('cc', 'ENGINE CLASS', 'faster engine, tougher rivals');
     const row = $('div', 'cc-row');
     const defs = [
-      { cc: 50, big: '50', nm: '50cc', sub: 'RELAXED', c: '#2fbf5f', c2: '#8ff0a8', key: null },
-      { cc: 100, big: '100', nm: '100cc', sub: 'STANDARD', c: '#ffb41f', c2: '#ffe37a', key: null },
-      { cc: 150, big: '150', nm: '150cc', sub: 'BLAZING', c: '#ff4d5a', c2: '#ff9a8a', key: 'cc:150' },
+      { cc: 50, big: '50', nm: 'CRUISER', sub: 'RELAXED', c: '#2fbf5f', c2: '#8ff0a8', key: null },
+      { cc: 100, big: '100', nm: 'SPEEDSTER', sub: 'STANDARD', c: '#ffb41f', c2: '#ffe37a', key: null },
+      { cc: 150, big: '150', nm: 'BLAZER', sub: 'BLAZING', c: '#ff4d5a', c2: '#ff9a8a', key: 'cc:150' },
       { cc: 'mirror', big: '<span class="mir">150</span>', nm: 'MIRROR', sub: 'FLIPPED COURSES', c: '#7a3cff', c2: '#b79cff', key: 'cc:mirror' },
     ];
     const items = defs.map((d) => {
@@ -568,7 +568,7 @@
       if (lock) card.appendChild(lockBadge());
       grid.appendChild(card); items.push(card);
     });
-    const rnd = $('div', 'card rand-card', '<div class="in"><span class="dice"></span>RANDOM<span class="dice"></span></div>');
+    const rnd = $('div', 'card rand-card', '<div class="in"><span class="dice"></span>RANDOM</div>');
     grid.appendChild(rnd); items.push(rnd);
     el.appendChild(grid);
     const info = $('div', 'char-info', '<div class="ci-nm"></div><div class="ci-tag"></div><div class="ci-sp"></div>');
@@ -613,7 +613,7 @@
     refresh();
     let busy = false;
     const scr = {
-      el, items, cols: 5, idx: 0, onFocus: focus,
+      el, items, cols: 7, idx: 0, onFocus: focus,
       pick(i) {
         if (busy) return;
         const st = cur(); if (!st) return;
