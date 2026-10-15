@@ -508,7 +508,7 @@
     seed: 303, hw: 10, shoulder: 3, scale: 1, style: 'meadow',
     theme: {
       sky: [0x4aa0f0, 0xcfeaff, 0xffe9b8], fog: [0xd8eeff, 160, 520], ground: 0x78c85a, shoulder: 0x62b048,
-      road: [0xc8a46a, 0xbf9b60], curb: [0xff4d6d, 0xffffff], hemi: [0xe6f2ff, 0x84b864, 1.0], sun: [0xfff4d8, 0.9],
+      road: [0x70747f, 0x686c78], curb: [0xff4d6d, 0xffffff], hemi: [0xe6f2ff, 0x84b864, 1.0], sun: [0xfff4d8, 0.9],
       emb: 0x62b048, bg: 0xd8eeff,
     },
     walls: 'fence', wallColors: [0xff4d6d, 0xffffff],
