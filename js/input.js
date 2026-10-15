@@ -61,17 +61,24 @@
   const PREVENT = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'Slash', 'Backspace']);
 
   // standard-mapping gamepad button indices per action
+  // Layout for an Xbox controller (standard mapping): A/RT gas, B/LT brake, RB drift (hop),
+  // X/LB item, Y swap riders, R3 slap, View look back, Menu pause, D-pad also steers.
   const PAD = {
-    accel: [0],        // A
-    brake: [1],        // B
-    item: [2, 4],      // X, L1
+    accel: [0],        // A (RT handled as analog below)
+    brake: [1],        // B (LT handled as analog below)
+    item: [2, 4],      // X, LB
     swap: [3],         // Y
-    drift: [5],        // R1 (R2 handled separately)
-    pause: [9],        // Start
-    lookBack: [8],     // Back
-    slap: [6],         // L2
+    drift: [5],        // RB
+    pause: [9],        // Menu / Start
+    lookBack: [8],     // View / Back
+    slap: [11],        // right stick click
   };
-  const PAD_R2 = 7;
+  const PAD_LT = 6;
+  const PAD_RT = 7;
+  const PAD_DL = 14, PAD_DR = 15, PAD_DD = 13, PAD_DU = 12;
+  // Non-"standard" Xbox layouts (e.g. Firefox on Linux, xpad driver): remap raw indices to standard ones.
+  // raw: A0 B1 X2 Y3 LB4 RB5 View6 Menu7 Guide8 LS9 RS10; triggers on axes 2/5 (-1..1), d-pad on axes 6/7.
+  const XPAD_RAW_TO_STD = { 0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 8, 7: 9, 8: 16, 9: 10, 10: 11 };
   const PAD_STICK_X = 0;
   const PAD_STICK_Y = 1;   // positive = down
 
@@ -175,6 +182,7 @@
 
       for (let i = 0; i < api.count; i++) pollPlayer(players[i], pads);
       latchPress.clear();
+      bridgeMenus(pads, 1 / 60);
     },
 
     reset() {
@@ -246,7 +254,7 @@
     stepSteer(p, target);
     let steer = p.steerKey;
     if (pad && pad.axes) {
-      const ax = pad.axes[PAD_STICK_X] || 0;
+      const ax = padStickX(pad);
       if (Math.abs(ax) > DEADZONE) {
         steer = Math.sign(ax) * (Math.abs(ax) - DEADZONE) / (1 - DEADZONE);
       }
@@ -277,14 +285,15 @@
 
   function onKeyDown(e) {
     const code = e.code;
-    if (!code) return;
+    if (!code || e._fromPad) return; // synthetic menu keys from the gamepad bridge
+
     if (PREVENT.has(code) && !isTextTarget(e.target) && e.preventDefault) e.preventDefault();
     held.add(code);
     if (!e.repeat) latchPress.add(code);
   }
 
   function onKeyUp(e) {
-    if (e.code) held.delete(e.code);
+    if (e.code && !e._fromPad) held.delete(e.code);
   }
 
   function onBlur() {
@@ -320,22 +329,106 @@
     return navigator.getGamepads() || EMPTY_PADS;
   }
 
+  // Read a button by its STANDARD index, translating for non-standard (raw xpad) layouts.
+  function isStd(pad) { return pad.mapping === 'standard' || !pad.axes || pad.axes.length < 6; }
   function padBtn(pad, i) {
+    if (!isStd(pad)) {
+      if (i === PAD_LT) return padTrigger(pad, PAD_LT) > 0.5;
+      if (i === PAD_RT) return padTrigger(pad, PAD_RT) > 0.5;
+      if (i >= 12 && i <= 15) {
+        const hx = pad.axes[6] || 0, hy = pad.axes[7] || 0;
+        return i === PAD_DL ? hx < -0.5 : i === PAD_DR ? hx > 0.5 : i === PAD_DU ? hy < -0.5 : hy > 0.5;
+      }
+      for (const raw in XPAD_RAW_TO_STD) {
+        if (XPAD_RAW_TO_STD[raw] === i) {
+          const b = pad.buttons && pad.buttons[raw];
+          return !!b && (b.pressed || b.value > 0.5);
+        }
+      }
+      return false;
+    }
     const b = pad.buttons && pad.buttons[i];
     return !!b && (b.pressed || b.value > 0.5);
+  }
+  // analog trigger 0..1
+  function padTrigger(pad, i) {
+    if (!isStd(pad)) {
+      const a = pad.axes[i === PAD_LT ? 2 : 5];
+      return a === undefined ? 0 : (a + 1) / 2; // raw triggers rest at -1
+    }
+    const b = pad.buttons && pad.buttons[i];
+    return b ? b.value || (b.pressed ? 1 : 0) : 0;
+  }
+  function padStickX(pad) {
+    let x = (pad.axes && pad.axes[PAD_STICK_X]) || 0;
+    if (Math.abs(x) <= DEADZONE) {
+      if (padBtn(pad, PAD_DL)) x = -1;
+      else if (padBtn(pad, PAD_DR)) x = 1;
+    }
+    return x;
   }
 
   function readPadAction(pad, name) {
     if (name === 'throwBack') {
-      return !!pad.axes && (pad.axes[PAD_STICK_Y] || 0) > 0.5;
+      return (!!pad.axes && (pad.axes[PAD_STICK_Y] || 0) > 0.5) || padBtn(pad, PAD_DD);
     }
-    if (name === 'drift') {
-      const r2 = pad.buttons && pad.buttons[PAD_R2];
-      if (r2 && r2.value > 0.3) return true;
-    }
+    if (name === 'accel' && padTrigger(pad, PAD_RT) > 0.25) return true;
+    if (name === 'brake' && padTrigger(pad, PAD_LT) > 0.25) return true;
     const list = PAD[name];
     if (!list) return false;
     for (let i = 0; i < list.length; i++) if (padBtn(pad, list[i])) return true;
     return false;
+  }
+
+  // ---- gamepad -> menu keys bridge ----
+  // Menus are keyboard driven; while no race is being driven, translate pad input into synthetic
+  // key events (D-pad / left stick = arrows, A = Enter, B = Escape, Menu = Enter).
+  const navPrev = {};
+  const navRepeat = {};
+  function menuActive() {
+    const g = G.Game;
+    if (!g) return true;
+    const st = g.state;
+    return st === 'attract' || st === 'boot' || st === 'paused' || st === 'results' || st === 'ceremony';
+  }
+  function sendKey(code, key, type) {
+    let ev;
+    try { ev = new KeyboardEvent(type, { code, key, bubbles: true, cancelable: true }); } catch (e) { return; }
+    try { Object.defineProperty(ev, '_fromPad', { value: true }); } catch (e) { /* ignore */ }
+    (document.activeElement || document.body || document).dispatchEvent(ev);
+  }
+  let bridgeWasActive = false;
+  function bridgeMenus(pads, dt) {
+    const active = menuActive();
+    // entering a menu (e.g. pause via the Menu button): buttons already held must not "click"
+    const priming = active && !bridgeWasActive;
+    bridgeWasActive = active;
+    for (let pi = 0; pi < pads.length && pi < MAX_PADS; pi++) {
+      const pad = pads[pi];
+      if (!pad) continue;
+      const ax = (pad.axes && pad.axes[PAD_STICK_X]) || 0, ay = (pad.axes && pad.axes[PAD_STICK_Y]) || 0;
+      const dirs = {
+        ArrowLeft: padBtn(pad, PAD_DL) || ax < -0.6,
+        ArrowRight: padBtn(pad, PAD_DR) || ax > 0.6,
+        ArrowUp: padBtn(pad, PAD_DU) || ay < -0.6,
+        ArrowDown: padBtn(pad, PAD_DD) || ay > 0.6,
+        Enter: padBtn(pad, 0) || padBtn(pad, 9),
+        Escape: padBtn(pad, 1),
+      };
+      for (const code in dirs) {
+        const k = pi + code, down = active && dirs[code];
+        if (priming) { navPrev[k] = down; continue; }
+        if (down && !navPrev[k]) {
+          sendKey(code, code, 'keydown');
+          navRepeat[k] = 0.4;
+        } else if (down && code.indexOf('Arrow') === 0) {
+          navRepeat[k] -= dt;
+          if (navRepeat[k] <= 0) { sendKey(code, code, 'keydown'); navRepeat[k] = 0.12; }
+        } else if (!down && navPrev[k]) {
+          sendKey(code, code, 'keyup');
+        }
+        navPrev[k] = down;
+      }
+    }
   }
 })();

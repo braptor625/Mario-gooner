@@ -11,20 +11,20 @@ npx http-server .   # or: python3 -m http.server
 ```
 
 ## Controls
-| Action | Keyboard | Gamepad |
+| Action | Keyboard (1P) | Xbox controller (wired or wireless) |
 |---|---|---|
-| Accelerate | ↑ / W / X | A |
-| Brake / reverse | ↓ / S | B |
-| Steer | ← → / A D | Left stick |
-| Hop / drift (wiggle the steering to charge a mini-turbo) | Shift / Space | R1 / R2 |
-| Use thrower's item (hold to drag it behind you, hold ↓ to throw backwards) | E / L / Ctrl | X / L1 |
-| Swap riders (and their items) | Q / Z | Y |
-| Look back | C | Back |
-| Pause | Esc / P | Start |
-| Mute | M | |
-| FPS / perf overlay | F3 (or add `?fps` to the URL) | |
+| Accelerate | ↑ / W / X | A or RT |
+| Brake / reverse | ↓ / S | B or LT |
+| Steer | ← → / A D | Left stick or D-pad |
+| Hop / drift (wiggle the steering twice for blue sparks, then release for a mini-turbo) | Shift / Space | RB |
+| Use the rear rider's item (hold to drag it behind you; hold down to throw it backwards) | E / L / Ctrl | X or LB |
+| Swap riders (their items swap too) | Q / Z | Y |
+| Slap a kart beside you | F | Right stick click |
+| Look back | C | View |
+| Pause | Esc / P | Menu |
+| Menus | Arrows + Enter / Esc | D-pad or stick + A / B |
 
-For a rocket start, press accelerate just as the "1" disappears.
+The controller works in Chrome, Edge and Firefox. In Firefox on Linux it may not report the standard layout; that case is handled too. For a 2-player game on one keyboard, player 1 uses W/A/S/D, Left Shift, E and Q. Player 2 uses the arrows, Right Shift, Enter and comma. Every connected controller is assigned to a player.
 
 ## Content
 - **8 characters** in 4 natural pairs, each pair with its own special item: Blaze & Ember (Fireballs), Rosa & Lily (Heart Shield), Pip & Pop (Mystery Egg), Grub & Krag (Mega Peel / Spiked Mega Shell).

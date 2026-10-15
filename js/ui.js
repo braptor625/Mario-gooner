@@ -561,10 +561,10 @@
     const items = [];
     list.forEach((c) => {
       const lock = !charOpen(c);
-      const card = $('div', 'card pcard' + (lock ? ' locked' : ''), '<div class="in"><div class="pt"></div><div class="nm"></div><span class="badge ' + c.weight + '"></span></div>');
+      const card = $('div', 'card pcard' + (lock ? ' locked' : ''), '<div class="in"><div class="pt"></div><div class="nrow"><div class="nm"></div><span class="badge ' + c.weight + '"></span></div></div>');
       card.querySelector('.pt').appendChild(lock ? $('div', 'q', '?') : portrait(c.id));
       card.querySelector('.nm').textContent = lock ? '???' : c.name;
-      card.querySelector('.badge').textContent = c.weight;
+      card.querySelector('.badge').textContent = String(c.weight || 'm')[0].toUpperCase();
       if (lock) card.appendChild(lockBadge());
       grid.appendChild(card); items.push(card);
     });
@@ -1206,6 +1206,7 @@
     showGPFinal,
     showUnlocks,
     showBattleResults,
+    _t: { F, showSetup, showCC, startChars, showKarts, showCups, showCourses, showBattleType, showArenas, showRecords, showOptions, launch },
   };
 
   // ------------------------------------------------------------------ HUD (per-viewport instances)
@@ -1218,6 +1219,16 @@
     if (it && it.icon) return /^\s*</.test(it.icon) ? it.icon : '<span class="lbl">' + it.icon + '</span>';
     return '<span class="lbl">' + (id ? String(id).slice(0, 3).toUpperCase() : '?') + '</span>';
   }
+
+  const nameIds = {};
+  function riderId(v) {
+    if (!v) return null;
+    if (nameIds[v] !== undefined) return nameIds[v];
+    let c = charById(v);
+    if (!c) { const l = String(v).toLowerCase(); c = chars().find((x) => String(x.name).toLowerCase() === l); }
+    return (nameIds[v] = c ? c.id : null);
+  }
+  const coopIdx = (v) => { if (typeof v === 'number') return v; const m = /(\d)/.exec(String(v)); return m ? (+m[1] - 1) : null; };
 
   function createHUD(index, count) {
     index = index | 0; count = clamp(count | 0 || 1, 1, 4);
@@ -1251,6 +1262,7 @@
       count: q('.count'), banner: q('.banner'), bannerTx: q('.banner span'), wrong: q('.wrong'),
     };
     R.ctx = R.canvas.getContext('2d');
+    R.mini.classList.add('hidden');
     if (count > 1) { R.ptag.textContent = PNAME[index]; R.ptag.classList.remove('hidden'); }
     let last = HUD_LAST_RESET();
     let mini = null, visible = false, miniT = 0, lastMini = null;
@@ -1265,7 +1277,7 @@
         if (count === 2) { hh = 0.5; t = index === 0 ? 0 : 0.5; }
         else if (count >= 3) { w = 0.5; hh = 0.5; l = (index % 2) * 0.5; t = (index >> 1) * 0.5; }
         el.style.left = (l * 100) + '%'; el.style.top = (t * 100) + '%'; el.style.width = (w * 100) + '%'; el.style.height = (hh * 100) + '%';
-        const u = Math.min(W * w / 100, H * hh / 56.25) * (count > 1 ? 1.28 : 1);
+        const u = Math.min(W * w / 100, H * hh / 56.25) * (count > 1 ? 1.12 : 1);
         el.style.setProperty('--u', Math.max(3, u).toFixed(2) + 'px');
       },
       show() { G.UI.init(); visible = true; el.classList.remove('hidden'); h._layout(); },
@@ -1283,7 +1295,9 @@
         mini = null; lastMini = null;
         const W = R.canvas.width, Hh = R.canvas.height;
         R.ctx.clearRect(0, 0, W, Hh);
-        if (!m || !m.points || !m.points.length || !m.bounds) return;
+        const ok = !!(m && m.points && m.points.length && m.bounds);
+        R.mini.classList.toggle('hidden', !ok);
+        if (!ok) return;
         const b = m.bounds, pad = 14;
         const bw = Math.max(1, b.maxX - b.minX), bh = Math.max(1, b.maxZ - b.minZ);
         const rot = bw > bh * 1.15;       // portrait layout: rotate wide tracks
@@ -1348,8 +1362,8 @@
         const ww = !!s.wrongWay;
         if (ww !== last.wrong) { last.wrong = ww; R.wrong.classList.toggle('on', ww); }
         // items + faces
-        updateSlot(0, s, s.rear);
-        updateSlot(1, s, s.front);
+        updateSlot(0, s, riderId(s.rearId || s.rear));
+        updateSlot(1, s, riderId(s.frontId || s.front));
         // coop
         let ck = '';
         if (s.coop) {
@@ -1365,7 +1379,8 @@
             const d = s.coop.driver, t = s.coop.thrower;
             const lab = (v) => (typeof v === 'number' ? 'P' + (v + 1) : String(v));
             R.cpD.textContent = lab(d) + ' DRIVE'; R.cpT.textContent = lab(t) + ' THROW';
-            R.cpD.style.background = typeof d === 'number' ? PCOL[d % 4] : ''; R.cpT.style.background = typeof t === 'number' ? PCOL[t % 4] : '';
+            const di = coopIdx(d), ti = coopIdx(t);
+            R.cpD.style.background = di != null ? PCOL[di % 4] : ''; R.cpT.style.background = ti != null ? PCOL[ti % 4] : '';
           }
         }
         // minimap at ~30Hz

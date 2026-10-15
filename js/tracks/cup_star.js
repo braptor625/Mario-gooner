@@ -200,8 +200,9 @@
       }
       return -1;
     };
-    const sh = o.shoulder, under = o.under === undefined ? 1.5 : o.under;
+    const sh = o.shoulder || 0, under = o.under === undefined ? 1.5 : o.under;
     const h = (x, z) => {
+      if (o.direct) return o.height(x, z, -1, 0, 0);
       const i = near(x, z);
       if (i < 0) return o.height(x, z, -1, 999, 0);
       const dc = Math.hypot(x - kit.px[i], z - kit.pz[i]);
@@ -424,5 +425,652 @@
     };
   }
 
+
+  // ====================================================================================================
+  // COURSE 2 — NEON METRO  (night city: boulevards, traffic, neon signs, a canal bridge, building gate)
+  // ====================================================================================================
+  const METRO_HW = 14;
+  (function metro() {
+    const corners = [[380, 0, 80], [380, 250, 70], [250, 250, 45], [250, 150, 45], [130, 150, 45], [130, 260, 60], [-50, 260, 60], [-50, 0, 70]];
+    const pts = polyPts(corners, {
+      step: 45, startT: 0.55,
+      y: (s, x, z) => (z < 100 ? 5.5 * Math.exp(-Math.pow((x - 315) / 55, 2)) : 0) + (x > 100 && x < 260 && z > 200 ? 0 : 0),
+      hw: () => METRO_HW,
+    });
+    const S = sampler(pts), L = S.L;
+    const dGate = S.dOf(40, 260);
+    G.defineTrack({
+      id: 'neon_metro', name: 'Neon Metro', cup: 'star', order: 2, laps: 3, music: 'city', seed: 5202,
+      hw: METRO_HW, shoulder: 4, scale: 1, offroad: 'offroad',
+      walls: 'barrier', wallColors: [0x3df2ff, 0xff3df0],
+      theme: {
+        sky: [0x02030f, 0x151a44, 0x4a2a6a], fog: [0x1a1a40, 90, 430], ground: 0x0d0f24, shoulder: 0x1b1e3c,
+        road: [0x2d3044, 0x292c40], curb: [0xff3df0, 0x3df2ff], hemi: [0x7f8cff, 0x241a50, 0.95], sun: [0x9aa8ff, 0.45],
+        emb: 0x14163a, bg: 0x1a1a40,
+      },
+      pts,
+      pads: [{ d: 50, len: 10, l: -6, w: 7 }, { d: 50, len: 10, l: 6, w: 7 }, { d: S.dOf(380, 150), len: 10, l: 0, w: 9 }, { d: S.dOf(120, 200) - 10, len: 10, l: -7, w: 8 }, { d: S.dOf(-50, 100), len: 10, l: 6, w: 8 }],
+      jumps: [], zones: [],
+      itemRows: [0.06, 0.2, 0.34, 0.5, 0.66, 0.82].map((f, i) => ({ d: f * L, count: 5, double: i === 2 || i === 5 })),
+      decorate: metroDecor(S, dGate),
+      hazards: metroHazards(S),
+    });
+  })();
+
+  function metroDecor(S, dGate) {
+    return function (track, kit) {
+      const rng = kit.rng, col = kit.col, gy = kit.groundY, L = kit.length, HW = METRO_HW;
+      const WT = 18;   // road + shoulder
+      // ---------------- own night sky dome (covers the default backdrop), stars, moon, skyline ring
+      {
+        const geo = kit.trackGeom(new T.SphereGeometry(280, 24, 16));
+        const pos = geo.attributes.position, cc = new Float32Array(pos.count * 3);
+        const top = col(0x02030f), mid = col(0x1a1650), hor = col(0x7a2a8a), bot = col(0x1a1a40);
+        for (let i = 0; i < pos.count; i++) {
+          const v = pos.getY(i) / 280;
+          const c = v > 0.35 ? kit.mix(mid, top, (v - 0.35) / 0.65) : v > 0 ? kit.mix(hor, mid, v / 0.35) : kit.mix(hor, bot, Math.min(1, -v * 4));
+          cc[i * 3] = c[0]; cc[i * 3 + 1] = c[1]; cc[i * 3 + 2] = c[2];
+        }
+        geo.setAttribute('color', new T.BufferAttribute(cc, 3));
+        const m = new T.Mesh(geo, kit.trackMat(new T.MeshBasicMaterial({ vertexColors: true, side: T.BackSide, fog: false, depthWrite: false, depthTest: false })));
+        m.renderOrder = -998; kit.follow(m); kit.add(m);
+        const sb = new kit.Batch();
+        sb.blob(-130, 150, -200, 14, 14, 14, col(0xfff4d8), 1);
+        for (let i = 0; i < 34; i++) {
+          const a = rng() * TAU, h = 160 + rng() * 80, x = Math.cos(a) * 250, z = Math.sin(a) * 250;
+          const w = 8 + rng() * 14, ht = 20 + rng() * 80;
+          sb.box(x, -10, z, w, ht + 10, w, -a, col(0x0b0b22));
+          const lit = [col(0xffd36f), col(0x6fe6ff), col(0xff6ad5)];
+          for (let k = 0; k < 6; k++) sb.box(x - Math.sin(a) * 0, -10 + 6 + rng() * ht, z, 1.6, 1.4, w + 0.4, -a, lit[(rng() * 3) | 0]);
+        }
+        const stars = [];
+        for (let i = 0; i < 160; i++) { const a = rng() * TAU, e = 0.25 + rng() * 1.1, r = 270; sb.box(Math.cos(a) * Math.cos(e) * r, Math.sin(e) * r, Math.sin(a) * Math.cos(e) * r, 1.3, 1.3, 1.3, a, [0.9, 0.9, 1]); }
+        const sm = kit.mesh(sb, { fog: false, depthWrite: false }, true); sm.renderOrder = -997; kit.follow(sm);
+      }
+      // ---------------- textured buildings
+      const wt = tex(kit, 128, 256, (c, w, h) => {
+        c.fillStyle = '#16182e'; c.fillRect(0, 0, w, h);
+        for (let y = 0; y < 16; y++) for (let x = 0; x < 8; x++) {
+          const r = rng();
+          if (r < 0.58) { const k = 150 + Math.floor(rng() * 105); c.fillStyle = `rgb(${k},${Math.min(255, k + 10)},${Math.min(255, k - (rng() < 0.3 ? 70 : 20))})`; }
+          else c.fillStyle = '#23264a';
+          c.fillRect(x * 16 + 3, y * 16 + 4, 10, 9);
+        }
+      });
+      if (wt) { wt.wrapS = wt.wrapT = T.RepeatWrapping; wt.anisotropy = 4; }
+      const P = [], U = [], C = [];
+      const tq = (a, b, c, d, ua, ub, uc, ud, k) => {
+        for (const [p, u] of [[a, ua], [b, ub], [c, uc], [a, ua], [c, uc], [d, ud]]) { P.push(p[0], p[1], p[2]); U.push(u[0], u[1]); C.push(k[0], k[1], k[2]); }
+      };
+      const tbox = (cx, y0, cz, sx, sy, sz, ry, k) => {
+        const c = Math.cos(ry), s = Math.sin(ry), hx = sx / 2, hz = sz / 2, y1 = y0 + sy;
+        const v = (lx, lz, y) => [cx + lx * c + lz * s, y, cz - lx * s + lz * c];
+        const cs = [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz]];
+        const off = rng();
+        for (let i = 0; i < 4; i++) {
+          const a = cs[i], b = cs[(i + 1) % 4], len = Math.hypot(b[0] - a[0], b[1] - a[1]) / 24, hh = sy / 56;
+          tq(v(a[0], a[1], y0), v(b[0], b[1], y0), v(b[0], b[1], y1), v(a[0], a[1], y1), [off, 0], [off + len, 0], [off + len, hh], [off, hh], k);
+        }
+        const z0 = [0.01, 0.002];
+        tq(v(-hx, -hz, y1), v(hx, -hz, y1), v(hx, hz, y1), v(-hx, hz, y1), z0, z0, z0, z0, mul3(k, 0.35));
+      };
+      const mul3 = (k, f) => [k[0] * f, k[1] * f, k[2] * f];
+      const tints = [col(0xffb0e8), col(0x9ff0ff), col(0xffd98a), col(0xb9a8ff), col(0xa8ffd0), col(0xff9a9a)];
+      const nb = new kit.Batch();  // neon trims / signs poles / lamps (unlit)
+      const roofCols = [col(0xff3df0), col(0x3df2ff), col(0xffe14a), col(0x8f6bff)];
+      const bldgs = [];
+      const place = (x, z, w, dp, h, ry) => {
+        const k = tints[(rng() * tints.length) | 0];
+        tbox(x, gy - 1, z, w, h + 1, dp, ry, k);
+        // roof neon trim + antenna
+        const rc = roofCols[(rng() * roofCols.length) | 0];
+        for (const e of [[w / 2, 0, 0.5, dp], [-w / 2, 0, 0.5, dp], [0, dp / 2, w, 0.5], [0, -dp / 2, w, 0.5]]) {
+          const c0 = Math.cos(ry), s0 = Math.sin(ry);
+          nb.box(x + e[0] * c0 + e[1] * s0, gy + h, z - e[0] * s0 + e[1] * c0, e[2], 0.6, e[3], ry, rc);
+        }
+        if (h > 55 && rng() < 0.7) { nb.box(x, gy + h, z, 0.4, 10, 0.4, 0, [0.9, 0.9, 1]); nb.box(x, gy + h + 10, z, 0.8, 0.8, 0.8, 0, [1, 0.2, 0.2]); }
+        bldgs.push({ x, z, w, dp, h, ry });
+      };
+      const inCanal = (x, z) => x > 285 && x < 345 && z > -80 && z < 150;
+      for (let gx = -190; gx < 560; gx += 34) for (let gz = -150; gz < 430; gz += 34) {
+        const x = gx + (rng() - 0.5) * 8, z = gz + (rng() - 0.5) * 8;
+        const w = 14 + rng() * 14, dp = 14 + rng() * 14, sz = Math.max(w, dp) * 0.75;
+        if (!kit.clear(x, z, WT + sz + 8)) continue;
+        if (inCanal(x, z) || inCanal(x + 20, z) || inCanal(x - 20, z)) continue;
+        const near = !kit.clear(x, z, WT + sz + 40);
+        const h = near ? 22 + rng() * 40 : 45 + rng() * 95;
+        place(x, z, w, dp, h, 0);
+      }
+      kit.farScatter(40, 60, (x, z, r) => place(x, z, 20 + r() * 24, 20 + r() * 24, 70 + r() * 150, 0));
+      // ---- gate building over the road (rectangular underpass)
+      {
+        const f = kit.frame(dGate), hy = Math.atan2(f.tx, f.tz), k = col(0xd8c8ff);
+        const wx = HW + 4 + 9;
+        for (const sd of [-1, 1]) {
+          const px = f.x + f.rx * sd * wx, pz = f.z + f.rz * sd * wx;
+          tbox(px, gy - 1, pz, 16, 41 + (f.y - gy), 22, hy, k);
+          nb.box(px, f.y + 12, pz, 16.6, 0.7, 22.6, hy, sd < 0 ? col(0xff3df0) : col(0x3df2ff));
+        }
+        const hx = f.x, hz = f.z;
+        tbox(hx, f.y + 12, hz, 2 * wx + 14, 26, 22, hy, k);
+        nb.box(hx, f.y + 11.4, hz, 2 * wx + 14.6, 0.6, 22.6, hy, col(0xffe14a));
+        for (let i = -4; i <= 4; i++) { const p = kit.at(dGate - 11.2, i * 4.2, 11.6); nb.box(p[0], p[1], p[2], 1.6, 0.35, 0.4, hy, i & 1 ? col(0xff3df0) : col(0x3df2ff)); }
+      }
+      // ---- elevated pedestrian skywalks across the boulevard
+      for (const d of [L * 0.1, L * 0.45, L * 0.7, L * 0.9]) {
+        const f = kit.frame(d), hy = Math.atan2(f.tx, f.tz);
+        const wx = HW + 5;
+        for (const sd of [-1, 1]) { const p = kit.at(d, sd * wx, 0); nb.box(p[0], p[1], p[2], 1.4, 9, 1.4, hy, col(0x6a6ab0)); }
+        nb.box(f.x, f.y + 8.6, f.z, 2.8, 1.8, 2 * wx + 2, hy + Math.PI / 2 * 0 + Math.PI / 2, col(0x8f8fd8));
+        nb.box(f.x, f.y + 8.2, f.z, 3.2, 0.35, 2 * wx + 2.4, hy + Math.PI / 2, col(0x3df2ff));
+        nb.box(f.x, f.y + 10.3, f.z, 3.2, 0.35, 2 * wx + 2.4, hy + Math.PI / 2, col(0xff3df0));
+      }
+      // ---- street lamps
+      for (let d = 20; d < L - 10; d += 38) for (const sd of [-1, 1]) {
+        const f = kit.frame(d), hy = Math.atan2(f.tx, f.tz), l = sd * (HW + 4 + 2.2);
+        const p = [f.x + f.rx * l, f.y, f.z + f.rz * l];
+        nb.box(p[0], p[1], p[2], 0.45, 9.5, 0.45, hy, col(0x5a5a80));
+        const q = [p[0] - f.rx * sd * 1.6, f.y + 9.4, p[2] - f.rz * sd * 1.6];
+        nb.box(q[0], q[1], q[2], 0.5, 0.5, 0.5, hy, col(0xfff0c0));
+        nb.box(p[0] - f.rx * sd * 0.8, f.y + 9.4, p[2] - f.rz * sd * 0.8, 0.3, 0.3, 1.8, hy + Math.PI / 2 * (Math.abs(f.rx) > 0.5 ? 0 : 1) * 0, col(0x5a5a80));
+      }
+      // ---- painted lane lines & zebra crossings (decals just above the road)
+      for (const lat of [-7, 7]) for (let d = 6; d < L - 6; d += 9) {
+        const a = kit.at(d, lat - 0.12, 0.05), b = kit.at(d + 4.5, lat - 0.12, 0.05), c = kit.at(d + 4.5, lat + 0.12, 0.05), e = kit.at(d, lat + 0.12, 0.05);
+        nb.quad(a, b, c, e, [0.85, 0.85, 0.9]);
+      }
+      for (const d of [L * 0.15, L * 0.38, L * 0.6, L * 0.78]) for (let l = -HW + 1; l < HW - 1; l += 2.2) {
+        const a = kit.at(d, l, 0.06), b = kit.at(d + 4, l, 0.06), c = kit.at(d + 4, l + 1.1, 0.06), e = kit.at(d, l + 1.1, 0.06);
+        nb.quad(a, b, c, e, [0.9, 0.9, 0.95]);
+      }
+      // ---- overhead gantries with neon + canal bridge arches
+      for (const d of [L * 0.03, L * 0.27, L * 0.55, L * 0.88]) {
+        const f = kit.frame(d), hy = Math.atan2(f.tx, f.tz), wx = HW + 4.6;
+        for (const sd of [-1, 1]) { const p = kit.at(d, sd * wx, 0); nb.box(p[0], p[1], p[2], 1.0, 8.5, 1.0, hy, col(0x7a7ab8)); }
+        nb.box(f.x, f.y + 8.5, f.z, 1.2, 1.2, 2 * wx + 1, hy + Math.PI / 2, col(0x7a7ab8));
+      }
+      {
+        const dB = S.dOf(315, 0);
+        for (const sd of [-1, 1]) for (let d = dB - 34; d <= dB + 34; d += 4) {
+          const a = kit.at(d, sd * (HW + 0.6), 0), b = kit.at(d + 4, sd * (HW + 0.6), 0), hh = 1.5;
+          nb.quad(a, [a[0], a[1] + hh, a[2]], [b[0], b[1] + hh, b[2]], b, col(0x3df2ff));
+        }
+        for (const sd of [-1, 1]) for (let k = 0; k <= 8; k++) {
+          const u = k / 8, d = dB - 34 + u * 68, hh = 8 * Math.sin(u * Math.PI), p = kit.at(d, sd * (HW + 0.6), 1.5 + hh);
+          nb.box(p[0], p[1], p[2], 0.5, 0.5, 0.5, 0, col(0xff3df0));
+        }
+        // canal water
+        const wm = new T.MeshPhongMaterial({ color: 0x0a2850, shininess: 160, specular: 0x66e6ff, transparent: true, opacity: 0.93 });
+        kit.trackMat(wm);
+        const wg = kit.trackGeom(new T.PlaneGeometry(40, 210)); wg.rotateX(-Math.PI / 2);
+        const wmesh = new T.Mesh(wg, wm); wmesh.position.set(315, gy + 0.12, 35); kit.add(wmesh);
+        for (const x of [293.5, 336.5]) nb.box(x, gy, 35, 3, 1.4, 210, 0, col(0x59a0b8));
+        for (let z = -60; z < 140; z += 18) for (const x of [296, 334]) nb.box(x, gy + 1.4, z, 0.7, 4, 0.7, 0, col(0xffe14a));
+      }
+      // ---- signs from a canvas atlas
+      const names = ['NEON METRO', 'RAMEN', 'ARCADE', 'HOTEL ZENITH', 'CINEMA', 'BUBBLE TEA', 'KARAOKE', 'MOTOR CLUB'];
+      const sc = [['#ff3df0', '#3a0a38'], ['#3df2ff', '#06303a'], ['#ffe14a', '#3a3206'], ['#8f6bff', '#1a0f3a']];
+      const at = tex(kit, 512, 256, (c, w, h) => {
+        c.fillStyle = '#05060f'; c.fillRect(0, 0, w, h);
+        names.forEach((nm, i) => {
+          const x = (i % 2) * 256, y = Math.floor(i / 2) * 64, [fg, bg] = sc[i % 4];
+          c.fillStyle = bg; c.fillRect(x + 3, y + 3, 250, 58);
+          c.strokeStyle = fg; c.lineWidth = 4; c.strokeRect(x + 5, y + 5, 246, 54);
+          c.font = '900 30px "Trebuchet MS", Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+          c.shadowColor = fg; c.shadowBlur = 12; c.fillStyle = '#ffffff'; c.fillText(nm, x + 128, y + 34); c.shadowBlur = 0;
+        });
+      });
+      const SP = [], SU = [];
+      const sign = (p, hy, w, h, idx) => {
+        const cx = Math.cos(hy), sx = Math.sin(hy), u0 = (idx % 2) * 0.5, v1 = 1 - Math.floor(idx / 2) * 0.25, v0 = v1 - 0.25;
+        const q = (l, y) => [p[0] + cx * l, p[1] + y, p[2] - sx * l];
+        const a = q(-w / 2, 0), b = q(w / 2, 0), c = q(w / 2, h), d = q(-w / 2, h);
+        const uu = [[u0, v0], [u0 + 0.5, v0], [u0 + 0.5, v1], [u0, v1]];
+        for (const [pp, u] of [[a, uu[0]], [b, uu[1]], [c, uu[2]], [a, uu[0]], [c, uu[2]], [d, uu[3]]]) { SP.push(pp[0], pp[1], pp[2]); SU.push(u[0], u[1]); }
+      };
+      // billboards on stilts facing the road, and flush signs on nearby buildings
+      let si = 0;
+      for (let d = 70; d < L - 40; d += 85 + rng() * 40) {
+        const sd = rng() < 0.5 ? -1 : 1, f = kit.frame(d), hy = Math.atan2(f.tx, f.tz) + (sd > 0 ? Math.PI / 2 : -Math.PI / 2);
+        const p = kit.at(d, sd * (HW + 4 + 9), 0);
+        nb.box(p[0], p[1], p[2], 0.8, 13, 0.8, 0, col(0x6a6ab0));
+        sign([p[0], p[1] + 12, p[2]], hy, 22, 5.5, (si++) % names.length);
+        nb.box(p[0], p[1] + 11.6, p[2], 22.6, 0.4, 0.4, hy - Math.PI / 2 + Math.PI / 2 * 0, col(0xffffff));
+      }
+      for (const bd of bldgs) {
+        if (bd.h < 40 || rng() < 0.45) continue;
+        if (kit.clear(bd.x, bd.z, 70)) continue;
+        // face the nearest road sample
+        let bi = 0, bdm = 1e9;
+        for (let i = 0; i < kit.N; i += 6) { const dm = Math.hypot(kit.px[i] - bd.x, kit.pz[i] - bd.z); if (dm < bdm) { bdm = dm; bi = i; } }
+        const ang = Math.atan2(kit.px[bi] - bd.x, kit.pz[bi] - bd.z);
+        const ex = Math.max(bd.w, bd.dp) / 2 + 0.3;
+        const p = [bd.x + Math.sin(ang) * ex, gy + 14 + rng() * (bd.h - 24), bd.z + Math.cos(ang) * ex];
+        sign(p, ang + Math.PI, 11, 2.8, (si++) % names.length);
+      }
+      // build meshes
+      const bg = new T.BufferGeometry();
+      bg.setAttribute('position', new T.Float32BufferAttribute(P, 3)); bg.setAttribute('uv', new T.Float32BufferAttribute(U, 2)); bg.setAttribute('color', new T.Float32BufferAttribute(C, 3));
+      bg.computeBoundingSphere(); kit.trackGeom(bg);
+      const bm = kit.trackMat(new T.MeshBasicMaterial(wt ? { map: wt, vertexColors: true } : { vertexColors: true, color: 0x555577 }));
+      const bmesh = new T.Mesh(bg, bm); bmesh.frustumCulled = false; kit.add(bmesh);
+      kit.mesh(nb, {}, true);
+      if (SP.length) {
+        const sg = new T.BufferGeometry();
+        sg.setAttribute('position', new T.Float32BufferAttribute(SP, 3)); sg.setAttribute('uv', new T.Float32BufferAttribute(SU, 2));
+        sg.computeBoundingSphere(); kit.trackGeom(sg);
+        const sm = kit.trackMat(new T.MeshBasicMaterial(at ? { map: at, side: T.DoubleSide } : { color: 0xff3df0, side: T.DoubleSide }));
+        const smesh = new T.Mesh(sg, sm); smesh.frustumCulled = false; kit.add(smesh);
+      }
+    };
+  }
+
+  function metroHazards(S) {
+    return function (track, kit) {
+      const col = kit.col, L = kit.length, list = [];
+      const mats = [];
+      const carGeo = (len, wid, ht, cab, cabLen, kind) => {
+        const b = new kit.Batch(), body = [1, 1, 1], glass = [0.08, 0.1, 0.16], tire = [0.05, 0.05, 0.06];
+        b.box(0, 0.35, 0, wid, ht * 0.5, len, 0, body);
+        b.box(0, 0.35 + ht * 0.5, -len * 0.05, wid * 0.88, cab, cabLen, 0, glass);
+        b.box(0, 0.35 + ht * 0.5 + cab, -len * 0.05, wid * 0.9, 0.12, cabLen + 0.1, 0, body);
+        b.box(-wid * 0.34, 0.3, len / 2 + 0.01, wid * 0.22, 0.28, 0.1, 0, [1, 1, 0.8]); b.box(wid * 0.34, 0.3 + 0.35, len / 2 + 0.01, wid * 0.22, 0.28, 0.1, 0, [1, 1, 0.8]);
+        b.box(-wid * 0.34, 0.65, -len / 2 - 0.01, wid * 0.22, 0.24, 0.1, 0, [1, 0.1, 0.1]); b.box(wid * 0.34, 0.65, -len / 2 - 0.01, wid * 0.22, 0.24, 0.1, 0, [1, 0.1, 0.1]);
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.box(sx * wid / 2, 0, sz * len * 0.32, 0.25, 0.7, 0.8, 0, tire);
+        if (kind === 'bus') for (let i = 0; i < 6; i++) for (const sx of [-1, 1]) b.box(sx * (wid / 2 + 0.01), 1.5, -len * 0.4 + i * len * 0.16, 0.05, 0.9, len * 0.1, 0, [1, 0.95, 0.6]);
+        if (kind === 'truck') { b.box(0, 0.5, -len * 0.18, wid * 1.0, ht * 1.2, len * 0.62, 0, [0.9, 0.9, 0.95]); }
+        return kit.trackGeom(b.build());
+      };
+      const types = [
+        { name: 'car', geo: carGeo(4.4, 2.1, 1.0, 0.75, 2.2), n: 12, r: 2.3 },
+        { name: 'van', geo: carGeo(5.2, 2.3, 1.5, 0.9, 3.0), n: 4, r: 2.6 },
+        { name: 'bus', geo: carGeo(11, 2.7, 2.2, 0.9, 9, 'bus'), n: 3, r: 4.2 },
+      ];
+      const palette = [0xff3d6a, 0x3dd4ff, 0xffd93d, 0x9d6bff, 0x4dffa0, 0xff8a3d, 0xe8e8f4, 0x3d6bff];
+      const laneLat = [-10.5, -3.5, 3.5, 10.5];
+      let ci = 0;
+      types.forEach((ty) => {
+        const mat = kit.trackMat(new T.MeshBasicMaterial({ vertexColors: true }));
+        const inst = makeInst(kit, ty.geo, mat, ty.n);
+        ty.inst = inst;
+        for (let i = 0; i < ty.n; i++) {
+          const lane = ty.name === 'bus' ? [1, 3, 0][i % 3] : (i * 3 + ci) % 4;
+          const dir = laneLat[lane] < 0 ? -1 : 1;
+          const v = (ty.name === 'bus' ? 11 : 13) + ((i * 5 + lane * 3) % 7) * 0.9;
+          const d0 = (L * ((i + 0.3 + lane * 0.21 + ci * 0.07) % ty.n)) / ty.n + 140;
+          const hz = { x: 0, y: 0, z: 0, radius: ty.r, hitKind: 'flip', vx: 0, vz: 0, active: true };
+          const f = { x: 0, y: 0, z: 0, tx: 0, tz: 1, rx: -1, rz: 0, halfWidth: 12 };
+          const lat = laneLat[lane], speed = v;
+          inst.color(i, palette[(i * 3 + ci * 5) % palette.length]);
+          const lastIdx = ty.n - 1;
+          hz.update = function (dt, time) {
+            let d = d0 + dir * speed * time; d = ((d % L) + L) % L;
+            track._frame(d, f);
+            this.x = f.x + f.rx * lat; this.z = f.z + f.rz * lat; this.y = f.y;
+            this.vx = f.tx * speed * dir; this.vz = f.tz * speed * dir;
+            inst.set(i, this.x, f.y, this.z, Math.atan2(f.tx * dir, f.tz * dir));
+            if (i === lastIdx) inst.done();
+          };
+          hz.update(0, 0);
+          list.push(hz);
+        }
+        ci++;
+      });
+      return list;
+    };
+  }
+
+
+  // ====================================================================================================
+  // COURSE 3 — SERPENT COAST  (the road outlines a giant sea-serpent seen from above: head, S-coils, tail)
+  // ====================================================================================================
+  const SERP_HW = 10.5, SERP_SH = 4.5;
+  const SERP = (function () {
+    // spine (turtle) from snout to tail tip
+    const segs = [['L', 112], ['A', -1, 64, Math.PI], ['L', 8], ['A', 1, 64, Math.PI], ['L', 30], ['A', -1, 52, Math.PI * 0.9]];
+    let x = 0, z = 0, phi = 0, u = 0;
+    const sx = [], sz = [], sp = [], su = [];
+    const push = () => { sx.push(x); sz.push(z); sp.push(phi); su.push(u); };
+    push();
+    const st = 2;
+    for (const sg of segs) {
+      if (sg[0] === 'L') {
+        const n = Math.round(sg[1] / st);
+        for (let i = 0; i < n; i++) { x += Math.cos(phi) * st; z += Math.sin(phi) * st; u += st; push(); }
+      } else {
+        const R = sg[2], n = Math.round((R * sg[3]) / st), dphi = (sg[1] * st) / R;
+        for (let i = 0; i < n; i++) {
+          const pm = phi + dphi / 2;
+          x += Math.cos(pm) * st; z += Math.sin(pm) * st; phi += dphi; u += st; push();
+        }
+      }
+    }
+    const U = u;
+    const wf = (uu) => {
+      let w;
+      if (uu < 54) w = lerp(26, 50, sstep(0, 56, uu));
+      else if (uu < 124) w = lerp(50, 26, sstep(56, 124, uu));
+      else w = lerp(26, 32, sstep(124, 300, uu));
+      const tt = sstep(U - 330, U, uu);
+      return lerp(w, 21.5, tt);
+    };
+    const yf = (uu) => 4.2 + 4.2 * (0.5 + 0.5 * Math.sin(uu * 0.011 + 1.0)) + 6.5 * Math.exp(-Math.pow(uu / 62, 2));
+    const sw = sx.map((_, i) => wf(su[i]));
+    return { sx, sz, sp, su, sw, U, wf, yf, n: sx.length };
+  })();
+
+  function serpentPts() {
+    const S = SERP, n = S.n, out = [];
+    const L = (i) => [S.sx[i] - Math.sin(S.sp[i]) * S.sw[i], S.sz[i] + Math.cos(S.sp[i]) * S.sw[i]];
+    const R = (i) => [S.sx[i] + Math.sin(S.sp[i]) * S.sw[i], S.sz[i] - Math.cos(S.sp[i]) * S.sw[i]];
+    const iStart = Math.round(84 / 2);
+    // path: left side tail-ward, tail cap, right side head-ward, head cap, back to start
+    const dense = [];
+    for (let i = iStart; i < n; i++) dense.push(L(i).concat([S.su[i]]));
+    { const i = n - 1, w = S.sw[i], ph = S.sp[i];
+      for (let k = 1; k < 24; k++) { const a = ph + Math.PI / 2 - (Math.PI * k) / 24; dense.push([S.sx[i] + Math.cos(a) * w, S.sz[i] + Math.sin(a) * w, S.su[i]]); } }
+    for (let i = n - 1; i >= 0; i--) dense.push(R(i).concat([S.su[i]]));
+    { const w = S.sw[0], ph = S.sp[0];
+      for (let k = 1; k < 24; k++) { const a = ph - Math.PI / 2 - (Math.PI * k) / 24; dense.push([S.sx[0] + Math.cos(a) * w, S.sz[0] + Math.sin(a) * w, 0]); } }
+    for (let i = 0; i < iStart; i++) dense.push(L(i).concat([S.su[i]]));
+    // resample by arclength
+    const cum = [0];
+    for (let i = 1; i < dense.length; i++) cum.push(cum[i - 1] + Math.hypot(dense[i][0] - dense[i - 1][0], dense[i][1] - dense[i - 1][1]));
+    const total = cum[cum.length - 1] + Math.hypot(dense[0][0] - dense[dense.length - 1][0], dense[0][1] - dense[dense.length - 1][1]);
+    const m = Math.round(total / 11), step = total / m;
+    let j = 0;
+    for (let k = 0; k < m; k++) {
+      const s = k * step;
+      while (j < cum.length - 2 && cum[j + 1] < s) j++;
+      const f = (s - cum[j]) / ((cum[j + 1] - cum[j]) || 1);
+      const a = dense[j], b = dense[j + 1];
+      const uu = a[2] + (b[2] - a[2]) * f;
+      out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, S.yf(uu), SERP_HW + 0.4 * Math.sin(k * 0.5)]);
+    }
+    return out;
+  }
+  const SERP_PTS = serpentPts();
+  // outline point at spine parameter u: side +1 = left outline, -1 = right outline, extra = outward metres
+  function serpOutline(u, side, extra) {
+    const i = clamp(Math.round(u / 2), 0, SERP.n - 1), ph = SERP.sp[i], w = SERP.sw[i] + (extra || 0);
+    return [SERP.sx[i] - Math.sin(ph) * w * side, SERP.sz[i] + Math.cos(ph) * w * side, ph];
+  }
+  (function serpent() {
+    const S = sampler(SERP_PTS), L = S.L;
+    const dAt = (u, side) => { const p = serpOutline(u, side); return S.dOf(p[0], p[1]); };
+    const dStart = dAt(84, 1);                      // pts[0] is the left outline at u=84 -> d=0
+    const rel = (d) => { let r = d - dStart; return ((r % L) + L) % L; };
+    const dJumpA = rel(dAt(104, -1)), dJumpB = rel(dAt(514, 1));
+    const dTun = rel(dAt(226, 1)), dFall = rel(dAt(396, -1));
+    SERP.marks = { dJumpA, dJumpB, dTun, dFall };
+    G.defineTrack({
+      id: 'serpent_coast', name: 'Serpent Coast', cup: 'star', order: 3, laps: 3, music: 'serpent', seed: 5303,
+      hw: SERP_HW, shoulder: SERP_SH, scale: 1, style: 'meadow', ground: false, offroad: 'grass',
+      walls: 'fence', wallColors: [0xf4efe0, 0xd9cfae],
+      theme: {
+        sky: [0x2f8fe8, 0x9fdcf8, 0xcff1f6], fog: [0xbfe9f4, 160, 640], ground: 0x0a7fa6, shoulder: 0x77c35a,
+        road: [0x7f766a, 0x776e62], curb: [0xff6a5a, 0xfff6e0], hemi: [0xdff4ff, 0x7fbf8a, 1.0], sun: [0xfff0d0, 0.9],
+        emb: 0xe6d49a, bg: 0xbfe9f4,
+      },
+      pts: SERP_PTS,
+      pads: [
+        { d: 40, len: 10, l: -4, w: 6 }, { d: 40, len: 10, l: 4, w: 6 },
+        { d: rel(dAt(300, 1)), len: 10, l: 0, w: 9 }, { d: rel(dAt(300, -1)) - 5, len: 10, l: 0, w: 9 },
+        { d: rel(dAt(560, -1)), len: 10, l: 0, w: 9 },
+      ],
+      jumps: [{ d: dJumpA, len: 10, l: 0, w: 13 }, { d: dJumpB, len: 10, l: 0, w: 13 }],
+      zones: [
+        { d: dJumpA + 11, len: 9, l: 0, w: 2 * (SERP_HW + SERP_SH), surface: 'void', offroad: true, color: 0x14688c },
+        { d: dFall - 11, len: 22, l: 0, w: 2 * (SERP_HW + SERP_SH), surface: 'water', offroad: true, color: 0x62d0f2 },
+      ],
+      itemRows: [0.05, 0.19, 0.34, 0.5, 0.66, 0.83].map((f, i) => ({ d: f * L, count: 5, double: i === 3 || i === 5 })),
+      decorate: serpentDecor(S, { dJumpA, dJumpB, dTun, dFall, rel, dAt }),
+      hazards: () => [],
+    });
+  })();
+
+  function serpentDecor(Sm, M) {
+    return function (track, kit) {
+      const rng = kit.rng, col = kit.col, SP = SERP, n = SP.n, hw = SERP_HW, edge = SERP_HW + SERP_SH;
+      const nr = { i: 0, dist: 0, lat: 0 };
+      const nearSp = (x, z) => {
+        let bi = 0, bd = 1e18;
+        for (let i = 0; i < n; i++) { const dx = x - SP.sx[i], dz = z - SP.sz[i], d = dx * dx + dz * dz; if (d < bd) { bd = d; bi = i; } }
+        const ph = SP.sp[bi];
+        nr.i = bi; nr.dist = Math.sqrt(bd); nr.lat = -(x - SP.sx[bi]) * Math.sin(ph) + (z - SP.sz[bi]) * Math.cos(ph);
+        return nr;
+      };
+      const terrH = (x, z) => {
+        nearSp(x, z);
+        const i = nr.i, w = SP.sw[i], roadH = SP.yf(SP.su[i]) - 0.8, dist = nr.dist;
+        if (dist <= w) return roadH + 8 * sstep(edge, edge + 22, w - dist);
+        const dd = dist - w;
+        if (dd <= 23) return roadH;
+        return Math.max(0.04, roadH - (dd - 23) * 0.3);
+      };
+      const seaC = col(0x0a7fa6);
+      const sand = col(0xe4d092), foam = col(0xcdeee8), shallow = col(0x3fc2b4);
+      const terr = makeTerrain(kit, {
+        direct: true, cell: 7, pad: 150,
+        height: (x, z) => terrH(x, z),
+        color: (x, z, h) => {
+          nearSp(x, z);
+          const i = nr.i, w = SP.sw[i], u = SP.su[i], dist = nr.dist, lat = nr.lat, nz = (rng() - 0.5) * 0.08;
+          if (dist <= w) {
+            const din = w - dist;
+            if (din > edge - 1) {
+              const dia = (Math.floor(u / 9) + Math.floor((lat + 120) / 8)) & 1;
+              let c = u < 124 ? (dia ? 0xa8d94c : 0x93c63f) : (dia ? 0x43a64b : 0x359340);
+              if (Math.abs(lat) < 2.8) c = u < 124 ? 0xe8e86a : 0xc4e65c;
+              return kit.mul(col(c), 1 + nz);
+            }
+            return kit.mul(col(0x6cc452), 1 + nz);
+          }
+          if (h <= 0.06) {
+            const dd = dist - w;
+            if (dd < 40) return dd < 30 ? foam : shallow;
+            return kit.mix(shallow, seaC, sstep(40, 150, dd));
+          }
+          if (h < 1.3) return kit.mul(sand, 1 + nz);
+          return kit.mul(col((Math.floor(x / 11) + Math.floor(z / 11)) & 1 ? 0x62bd4a : 0x58b043), 1 + nz);
+        },
+      });
+      kit.mesh(terr.mesh, {}, false);
+      // sea plane (same lambert colour as the far shelf)
+      {
+        const g = kit.trackGeom(new T.PlaneGeometry(7000, 7000)); g.rotateX(-Math.PI / 2);
+        const m = new T.Mesh(g, kit.trackMat(new T.MeshLambertMaterial({ color: 0x0a7fa6 })));
+        m.position.set(0, 0, 0); m.frustumCulled = false; kit.add(m);
+      }
+      // random point helper (accepts via cb returning true)
+      let bbx0 = 1e9, bbx1 = -1e9, bbz0 = 1e9, bbz1 = -1e9;
+      for (let i = 0; i < n; i++) { bbx0 = Math.min(bbx0, SP.sx[i]); bbx1 = Math.max(bbx1, SP.sx[i]); bbz0 = Math.min(bbz0, SP.sz[i]); bbz1 = Math.max(bbz1, SP.sz[i]); }
+      const sprinkle = (count, tries, cb) => {
+        let k = 0;
+        for (let t = 0; t < tries && k < count; t++) {
+          const x = bbx0 - 70 + rng() * (bbx1 - bbx0 + 140), z = bbz0 - 70 + rng() * (bbz1 - bbz0 + 140);
+          if (!kit.clear(x, z, 19)) continue;
+          if (cb(x, z)) k++;
+        }
+      };
+      const b = new kit.Batch();
+      // ---- palms
+      const trunk = col(0x9a6a3a), frond = [col(0x2f9a3a), col(0x3fb04a), col(0x58c25a)];
+      const palm = (x, y, z, s, r) => {
+        const lean = (r() - 0.5) * 2.2, ang = r() * TAU;
+        const dx = Math.cos(ang) * lean * s, dz = Math.sin(ang) * lean * s;
+        const p0 = [x, y, z], p1 = [x + dx * 0.5, y + 3.2 * s, z + dz * 0.5], p2 = [x + dx, y + 6.6 * s, z + dz];
+        tube(b, p0, p1, 0.38 * s, 0.3 * s, 5, trunk); tube(b, p1, p2, 0.3 * s, 0.24 * s, 5, trunk);
+        for (let f = 0; f < 7; f++) {
+          const a = (f / 7) * TAU + r(), c = Math.cos(a), sn = Math.sin(a), len = 3.4 * s;
+          const tip = [p2[0] + c * len, p2[1] - 1.5 * s, p2[2] + sn * len], mid = [p2[0] + c * len * 0.5, p2[1] + 0.9 * s, p2[2] + sn * len * 0.5];
+          const px = -sn * 0.55 * s, pz = c * 0.55 * s, k = frond[f % 3];
+          b.tri([p2[0], p2[1], p2[2]], [mid[0] + px, mid[1], mid[2] + pz], [mid[0] - px, mid[1], mid[2] - pz], k);
+          b.tri([mid[0] + px, mid[1], mid[2] + pz], tip, [mid[0] - px, mid[1], mid[2] - pz], k);
+        }
+        b.blob(p2[0], p2[1] - 0.2, p2[2], 0.35 * s, 0.35 * s, 0.35 * s, col(0x6a4a2a), 0);
+      };
+      sprinkle(190, 3000, (x, z) => {
+        const h = terrH(x, z); nearSp(x, z);
+        if (h < 1.0 || nr.dist < SP.sw[nr.i] + 3) return false;
+        palm(x, h, z, 0.8 + rng() * 0.7, rng); return true;
+      });
+      // ---- flowers (hibiscus clusters) and bushes
+      const fl = [col(0xff4f7a), col(0xff9a3d), col(0xffe14a), col(0xffffff), col(0xff6ad5)];
+      sprinkle(360, 5000, (x, z) => {
+        const h = terrH(x, z); nearSp(x, z);
+        if (h < 1.3 || nr.dist < SP.sw[nr.i] + 1) return false;
+        if (!kit.clear(x, z, 17.5)) return false;
+        const c = fl[(rng() * fl.length) | 0];
+        b.blob(x, h + 0.4, z, 0.9 + rng() * 0.5, 0.55, 0.9 + rng() * 0.5, col(0x2f8f3a), 0);
+        for (let k = 0; k < 4; k++) b.blob(x + (rng() - 0.5) * 1.6, h + 0.85 + rng() * 0.3, z + (rng() - 0.5) * 1.6, 0.34, 0.26, 0.34, c, 0);
+        return true;
+      });
+      // roadside flower strips right outside the fence
+      for (let d = 6; d < kit.length - 6; d += 7 + rng() * 6) for (const sd of [-1, 1]) {
+        const p = kit.at(d, sd * (edge + 2.2 + rng() * 2), 0);
+        if (rng() < 0.55) continue;
+        const h = terrH(p[0], p[2]); if (h < 1.3) continue;
+        const c = fl[(rng() * fl.length) | 0];
+        for (let k = 0; k < 3; k++) b.blob(p[0] + (rng() - 0.5) * 2, p[1] - 0.6 + rng() * 0.3, p[2] + (rng() - 0.5) * 2, 0.4, 0.3, 0.4, c, 0);
+      }
+      // rocks on beaches
+      sprinkle(60, 4000, (x, z) => {
+        const h = terrH(x, z); if (h > 1.8 || h < 0.04) return false;
+        const s = 0.8 + rng() * 2.2; b.blob(x, h, z, 1.6 * s, 0.9 * s, 1.3 * s, kit.mul(col(0x9a9a96), 0.9 + rng() * 0.2), 0); return true;
+      });
+      // far tropical islets
+      for (let k = 0; k < 14; k++) {
+        const a = rng() * TAU, r = 420 + rng() * 520, cx = (bbx0 + bbx1) / 2 + Math.cos(a) * r, cz = (bbz0 + bbz1) / 2 + Math.sin(a) * r;
+        const s = 14 + rng() * 26;
+        b.blob(cx, -1.5, cz, s, 3 + s * 0.12, s * 0.8, col(0xe8d59a), 1);
+        b.blob(cx, 1.5, cz, s * 0.7, 2.4 + s * 0.1, s * 0.6, col(0x4ab048), 1);
+        for (let q = 0; q < 4; q++) palm(cx + (rng() - 0.5) * s * 0.6, 3.5, cz + (rng() - 0.5) * s * 0.5, 1.2 + rng() * 0.8, rng);
+      }
+      // sailboats + buoys
+      for (let k = 0; k < 9; k++) {
+        const x = bbx0 - 250 + rng() * (bbx1 - bbx0 + 500), z = bbz0 - 250 + rng() * (bbz1 - bbz0 + 500);
+        if (terrH(x, z) > 0.05) continue;
+        const a = rng() * TAU, c0 = Math.cos(a), s0 = Math.sin(a);
+        b.box(x, 0, z, 2.2, 1.0, 7, -a + Math.PI / 2, col(0xf4efe0));
+        tube(b, [x, 0.9, z], [x, 9, z], 0.15, 0.1, 4, col(0x6a4a2a));
+        b.tri([x + c0 * 0.1, 8.6, z - s0 * 0.1], [x + c0 * 0.1, 1.6, z - s0 * 0.1], [x + s0 * 3.2, 1.6, z + c0 * 3.2], col(0xffffff));
+        b.tri([x, 8.6, z], [x, 1.6, z], [x - s0 * 2.4, 1.6, z - c0 * 2.4], [1, 0.45, 0.4]);
+      }
+      // ---- serpent landmarks: eyes, brow, nostrils, forked tongue, dorsal spines
+      {
+        const i0 = Math.round(34 / 2);
+        for (const sd of [-1, 1]) {
+          const w = SP.sw[i0], ph = SP.sp[i0];
+          const ex = SP.sx[i0] - Math.sin(ph) * w * 0.5 * sd, ez = SP.sz[i0] + Math.cos(ph) * w * 0.5 * sd, eh = terrH(ex, ez);
+          b.blob(ex, eh + 4.2, ez, 5.6, 5.2, 5.6, [1, 0.98, 0.9], 1);
+          const fx = Math.cos(ph) * -1, fz = Math.sin(ph) * -1;
+          b.blob(ex + fx * 3.2, eh + 4.4, ez + fz * 3.2, 3.0, 3.4, 3.0, col(0xffc21a), 1);
+          b.blob(ex + fx * 4.6, eh + 4.4, ez + fz * 4.6, 1.2, 2.8, 1.2, col(0x101010), 0);
+          b.box(ex + fx * 0.5, eh + 8.2, ez + fz * 0.5, 8, 1.6, 3, -ph, col(0x2c7a34));
+        }
+        // nostrils
+        for (const sd of [-1, 1]) {
+          const i1 = 1, ph = SP.sp[i1], w = SP.sw[i1];
+          const nx = SP.sx[i1] - Math.sin(ph) * w * 0.28 * sd - Math.cos(ph) * 10, nz = SP.sz[i1] + Math.cos(ph) * w * 0.28 * sd - Math.sin(ph) * 10;
+          b.blob(nx, terrH(nx, nz) + 1.3, nz, 1.8, 1.0, 1.8, col(0x2c6a30), 0);
+        }
+        // forked tongue lying on the headland / beach
+        const ph = SP.sp[0], tx = -Math.cos(ph), tz = -Math.sin(ph), nxl = -Math.sin(ph), nzl = Math.cos(ph), red = col(0xe8283c);
+        const tone = (d0, d1, w0, w1, off) => {
+          const q = (d, w) => { const x = SP.sx[0] + tx * d + nxl * (off + 0) , z = SP.sz[0] + tz * d + nzl * off; return [x + nxl * w, z + nzl * w, x, z]; };
+          for (let d = d0; d < d1; d += 3) {
+            const wa = lerp(w0, w1, (d - d0) / (d1 - d0)), wb = lerp(w0, w1, (d + 3 - d0) / (d1 - d0));
+            const ax = SP.sx[0] + tx * d + nxl * off, az = SP.sz[0] + tz * d + nzl * off, bx = SP.sx[0] + tx * (d + 3) + nxl * off, bz = SP.sz[0] + tz * (d + 3) + nzl * off;
+            const ya = Math.max(terrH(ax, az), 0.3) + 0.25, yb = Math.max(terrH(bx, bz), 0.3) + 0.25;
+            b.quad([ax - nxl * wa, ya, az - nzl * wa], [ax + nxl * wa, ya, az + nzl * wa], [bx + nxl * wb, yb, bz + nzl * wb], [bx - nxl * wb, yb, bz - nzl * wb], red);
+          }
+        };
+        tone(46, 78, 2.2, 1.6, 0);
+        for (const sd of [-1, 1]) {
+          for (let d = 78; d < 98; d += 3) {
+            const off = sd * (1.6 + (d - 78) * 0.42), ax = SP.sx[0] + tx * d + nxl * off, az = SP.sz[0] + tz * d + nzl * off;
+            const bx = SP.sx[0] + tx * (d + 3) + nxl * (off + sd * 1.25), bz = SP.sz[0] + tz * (d + 3) + nzl * (off + sd * 1.25);
+            const wd = 1.3 - (d - 78) * 0.045, ya = Math.max(terrH(ax, az), 0.3) + 0.25, yb = Math.max(terrH(bx, bz), 0.3) + 0.25;
+            b.quad([ax - nxl * wd, ya, az - nzl * wd], [ax + nxl * wd, ya, az + nzl * wd], [bx + nxl * wd, yb, bz + nzl * wd], [bx - nxl * wd, yb, bz - nzl * wd], red);
+          }
+        }
+        // dorsal spines along the spine
+        for (let u = 70; u < SP.U - 24; u += 7) {
+          const i = Math.round(u / 2), x = SP.sx[i], z = SP.sz[i], h = terrH(x, z), s = 0.8 + 0.9 * (SP.sw[i] / 32);
+          const c = (Math.floor(u / 7) & 1) ? col(0xff9a3d) : col(0xffd23d);
+          b.frustum(x, h - 0.2, z, 1.9 * s, 0, 5.2 * s, 5, c, u);
+        }
+      }
+      kit.mesh(b, {}, false);
+
+      // ---- hill tunnel
+      {
+        const tb = new kit.Batch(), d0 = M.dTun - 28, d1 = M.dTun + 42;
+        const r1 = col(0x8a7a66), r2 = col(0x7a6a58), g1 = col(0x3f9a46), g2 = col(0x57b34f);
+        tunnel(kit, tb, {
+          d0, d1, step: 5, na: 12, rx: edge + 2, h: 12.5, thick: 8, y0: -3,
+          color: (k, j, inner) => (inner ? ((k + j) & 1 ? col(0x5e5446) : col(0x6a5f50)) : (j > 3 && j < 11 ? ((k + j) & 1 ? g1 : g2) : ((k + j) & 1 ? r1 : r2))),
+          rim: (j) => (j & 1 ? col(0xd9cbb0) : col(0xc9b999)),
+        });
+        for (let d = d0 + 6; d < d1 - 2; d += 10) for (const sd of [-1, 1]) {
+          const p = kit.at(d, sd * (edge + 1.2), 4.5); tb.box(p[0], p[1], p[2], 0.8, 0.8, 0.8, 0, col(0xffe9a0));
+        }
+        kit.mesh(tb, {}, false);
+      }
+      // ---- waterfall cliff beside the road
+      {
+        const fb = new kit.Batch(), wb = new kit.Batch(), dF = M.dFall;
+        // outward side = the one farther from the spine
+        const f0 = kit.frame(dF), pa = kit.at(dF, 30, 0), pb = kit.at(dF, -30, 0);
+        nearSp(pa[0], pa[2]); const da = nr.dist; nearSp(pb[0], pb[2]); const db = nr.dist;
+        const sd = da > db ? 1 : -1;
+        const hy = Math.atan2(f0.tx, f0.tz);
+        const rock = [col(0x8a7a66), col(0x7a6a58), col(0x9a8a74)];
+        for (let k = 0; k < 9; k++) {
+          const dd = dF - 22 + k * 5.5, off = sd * (edge + 6 + rng() * 3), p = kit.at(dd, off, 0), hgt = 16 + rng() * 8;
+          fb.frustum(p[0], p[1] - 2, p[2], 6 + rng() * 2, 4 + rng() * 2, hgt, 7, rock[k % 3], rng());
+          fb.blob(p[0], p[1] + hgt - 2.5, p[2], 5.5, 3, 5.5, col(0x3f9a46), 1);
+        }
+        const top = kit.at(dF, sd * (edge + 3.4), 18), base = kit.at(dF, sd * (edge + 3.4), 0.2);
+        for (let k = -2; k <= 2; k++) {
+          const a = kit.at(dF + k * 2.6, sd * (edge + 3.2), 17), c = kit.at(dF + k * 2.6, sd * (edge + 3.2), 0.4);
+          wb.box(a[0], c[1], a[2], 2.2, a[1] - c[1], 1.2, hy, k & 1 ? col(0xdff6ff) : col(0xbfeaff));
+        }
+        const pool = kit.at(dF, sd * (edge + 1), 0.3);
+        wb.blob(pool[0], pool[1], pool[2], 9, 0.5, 9, col(0xcdf2ff), 1);
+        for (let k = 0; k < 6; k++) wb.blob(pool[0] + (rng() - 0.5) * 7, pool[1] + 1 + rng() * 2, pool[2] + (rng() - 0.5) * 7, 1.8, 1.8, 1.8, [1, 1, 1], 0);
+        kit.mesh(fb, {}, false);
+        kit.mesh(wb, { transparent: true, opacity: 0.86 }, false);
+        // cascade across the road: pale stripes (decal-like) flowing from the pool
+        const sb = new kit.Batch();
+        for (let k = 0; k < 6; k++) {
+          const l = sd * (edge - 2 - k * 4.2);
+          const a = kit.at(dF - 10, l, 0.14), c = kit.at(dF + 10, l, 0.14), a2 = kit.at(dF - 10, l + 1.2, 0.14), c2 = kit.at(dF + 10, l + 1.2, 0.14);
+          sb.quad(a, c, c2, a2, col(0xe6fbff));
+        }
+        kit.mesh(sb, {}, true);
+      }
+      // ---- cliff-jump set dressing: ramp banners and chevron signs
+      {
+        const jb = new kit.Batch();
+        for (const dj of [M.dJumpA, M.dJumpB]) {
+          for (const sd of [-1, 1]) {
+            const p = kit.at(dj - 2, sd * (hw + 1.8), 0), q = kit.at(dj - 2, sd * (hw + 1.8), 5.5);
+            tube(jb, p, q, 0.22, 0.22, 5, col(0xf4efe0));
+            const f = kit.frame(dj - 2), hy = Math.atan2(f.tx, f.tz);
+            jb.box(q[0], q[1] - 1.4, q[2], 0.2, 1.4, 3.0, hy, col(0xff6a5a));
+          }
+        }
+        for (let k = 0; k < 4; k++) for (const sd of [-1, 1]) {
+          const p = kit.at(M.dJumpA - 50 + k * 10, sd * (hw + 1.4), 0), q = kit.at(M.dJumpA - 50 + k * 10, sd * (hw + 1.4), 2.2);
+          tube(jb, p, q, 0.12, 0.12, 4, col(0xcccccc));
+          const f = kit.frame(M.dJumpA - 50 + k * 10), hy = Math.atan2(f.tx, f.tz);
+          jb.box(q[0], q[1] - 0.8, q[2], 0.1, 0.9, 1.6, hy, k & 1 ? col(0xffe14a) : col(0x2a2a2a));
+        }
+        kit.mesh(jb, {}, false);
+      }
+    };
+  }
   // @@END
 })();
