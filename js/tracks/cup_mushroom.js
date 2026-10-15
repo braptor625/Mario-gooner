@@ -639,7 +639,7 @@
           const p = kit.at(0, s * (10 + 3 + 1.5), 0);
           b.box(p[0], p[1], p[2], 1.6, 12, 1.6, ry, s < 0 ? col(0xff4d6d) : col(0x3aa0ff));
         }
-        for (let k = 0; k < 7; k++) rbox(b, kit, 0, 0, 12 + 0, 28.2 / 7 + 0.1, 3, 1.6, kit.hsl(k / 7, 0.8, 0.6));
+        for (let k = 0; k < 7; k++) rbox(b, kit, 0, -14.1 + (k + 0.5) * (28.2 / 7), 12, 28.2 / 7 + 0.1, 3, 1.6, kit.hsl(k / 7, 0.8, 0.6));
         void ry;
       }
       // ---- trees and hedges outside the coaster ring
@@ -681,9 +681,9 @@
     id: 'dusty_desert', name: 'Dustbowl Desert', cup: 'mushroom', order: 4, laps: 3, music: 'desert',
     seed: 404, hw: 14, shoulder: 5, scale: 1, style: 'dunes', offroad: 'sand', walls: 'adobe',
     theme: {
-      sky: [0x4c9be0, 0xf6d9a2, 0xeac47a], fog: [0xf1cf94, 130, 520], ground: 0xe6bd6c, shoulder: 0xd9aa58,
-      road: [0x9a8d7e, 0x908373], curb: [0xc8502d, 0xf3e2b8], hemi: [0xffeacc, 0xc89a55, 0.98], sun: [0xffe2b0, 1.0],
-      emb: 0xdcae5c, bg: 0xf1cf94,
+      sky: [0x4c9be0, 0xf6d9a2, 0xeac47a], fog: [0xf1cf94, 130, 520], ground: 0xd9a95a, shoulder: 0xcc9a4c,
+      road: [0x7c7064, 0x73675a], curb: [0xc8502d, 0xf3e2b8], hemi: [0xffe6c4, 0xb88a4c, 0.72], sun: [0xffe2b0, 0.75],
+      emb: 0xd0a050, bg: 0xf1cf94,
     },
     pts: [[0, 0, 0, 14], [120, 0, 0.3], [250, -5, 1], [350, -25, 1.5], [430, 10, 2], [465, 80, 2, 15], [450, 150, 1.5, 15],
       [400, 205, 1], [330, 225, 0.8], [250, 230, 0.8], [170, 245, 1.5], [105, 290, 2.5], [30, 300, 2.5], [-40, 270, 1.5],
@@ -703,7 +703,7 @@
         sw.frustum(0, 0, 0, R, R, 0.02, 28, col(0xd9b068), 0);
         for (let arm = 0; arm < 6; arm++) for (let k = 0; k < 14; k++) {
           const r0 = 2.5 + k * 1.15, r1 = r0 + 1.15, a0 = (arm / 6) * TAU + k * 0.30, a1 = a0 + 0.52, a2 = a0 + 0.30, a3 = a2 + 0.52;
-          sw.quad([Math.cos(a0) * r0, 0.04, Math.sin(a0) * r0], [Math.cos(a1) * r0, 0.04, Math.sin(a1) * r0], [Math.cos(a3) * r1, 0.04, Math.sin(a3) * r1], [Math.cos(a2) * r1, 0.04, Math.sin(a2) * r1], (arm + k) & 1 ? col(0x7a5a2a) : col(0xb08848));
+          sw.quad([Math.cos(a0) * r0, 0.04, Math.sin(a0) * r0], [Math.cos(a1) * r0, 0.04, Math.sin(a1) * r0], [Math.cos(a3) * r1, 0.04, Math.sin(a3) * r1], [Math.cos(a2) * r1, 0.04, Math.sin(a2) * r1], (arm + k) & 1 ? col(0x5a3d1a) : col(0xb08848));
         }
         sw.frustum(0, 0.06, 0, 4, 4, 0.02, 16, col(0x2a1a0c), 0);
         const m = kit.mesh(sw); m.position.set(c[0], c[1] + 0.12, c[2]); st.swirl = m;

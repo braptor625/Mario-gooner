@@ -249,17 +249,17 @@
       hw: HW, shoulder: 5, scale: 1, style: 'glacier', snow: true, offroad: 'offroad',
       walls: 'barrier', wallColors: [0xffffff, 0xbfe0f5],
       theme: {
-        sky: [0x4f8fe0, 0xc4e2fb, 0xeaf5ff], fog: [0xd2e8f8, 80, 430], ground: 0xe4f1fb, shoulder: 0xf4f9ff,
-        road: [0x7c869c, 0x737d93], curb: [0x2c7ed6, 0xffffff], hemi: [0xe0efff, 0xa4bcd8, 1.0], sun: [0xfff4e4, 0.85],
+        sky: [0x4f8fe0, 0xc4e2fb, 0xeaf5ff], fog: [0xd2e8f8, 80, 430], ground: 0xc9dff0, shoulder: 0xeef6fd,
+        road: [0x5d6880, 0x555f77], curb: [0x2c7ed6, 0xffffff], hemi: [0xdbeaff, 0x9db4d0, 0.8], sun: [0xfff4e4, 0.6],
         emb: 0xd8e8f6, bg: 0xd2e8f8,
       },
       pts,
       pads: [{ d: 40, len: 10, l: -4.5, w: 6 }, { d: 40, len: 10, l: 4.5, w: 6 }, { d: S.dOf(-120, 150) + 10, len: 10, l: 0, w: 8 }],
       jumps: [],
       zones: [
-        { d: dLake - 135, len: 270, l: 0, w: 2 * (HW + 7), surface: 'ice', offroad: true, color: 0xb4e2ff },
-        { d: dCave - 40, len: 90, l: 0, w: 2 * (HW + 7), surface: 'ice', offroad: true, color: 0xa4d8f8 },
-        { d: dLake2 - 25, len: 90, l: 0, w: 2 * (HW + 7), surface: 'ice', offroad: true, color: 0xb4e2ff },
+        { d: dLake - 135, len: 270, l: 0, w: 2 * (HW + 7), surface: 'ice', offroad: true, color: 0xd2f0ff },
+        { d: dCave - 40, len: 90, l: 0, w: 2 * (HW + 7), surface: 'ice', offroad: true, color: 0xc4e8ff },
+        { d: dLake2 - 25, len: 90, l: 0, w: 2 * (HW + 7), surface: 'ice', offroad: true, color: 0xd2f0ff },
       ],
       itemRows: [0.07, 0.2, 0.36, 0.52, 0.68, 0.84].map((f, i) => ({ d: f * L, count: 5, double: i === 4 })),
       decorate: frostyDecor(dLake, dCave, dLake2),
@@ -380,7 +380,7 @@
       ib.box(0, 2.6, 0, 2.6, 0.5, 2.6, 0, col(0xffffff));
       ib.box(0, 0.6, 0, 3.3, 0.5, 3.3, 0, col(0x9fd2f5));
       const ig = kit.trackGeom(ib.build());
-      const im = kit.trackMat(new T.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
+      const im = kit.trackMat(new T.MeshLambertMaterial({ vertexColors: true, emissive: 0x2a4a66, transparent: true, opacity: 0.92 }));
       const nb = 6;
       const blk = makeInst(kit, ig, im, nb);
 
@@ -394,12 +394,12 @@
       spec.forEach((s, i) => {
         const f = kit.frame(s[0]);
         const cx = f.x + f.rx * s[1], cz = f.z + f.rz * s[1];
-        const hz = { x: cx, y: f.y, z: cz, radius: 1.9, hitKind: 'spin', vx: 0, vz: 0, active: true, ph: i * 1.7, c: [cx, cz, f.y, s[2], s[3]] };
+        const hz = { x: cx, y: f.y, z: cz, radius: 2.1, hitKind: 'spin', vx: 0, vz: 0, active: true, ph: i * 1.7, c: [cx, cz, f.y, s[2], s[3]] };
         hz.update = function (dt, time) {
           const c = this.c, a = this.ph + time * c[4], r = c[3];
           this.x = c[0] + Math.cos(a) * r; this.z = c[1] + Math.sin(a) * r;
           this.vx = -Math.sin(a) * r * c[4]; this.vz = Math.cos(a) * r * c[4];
-          pen.set(i, this.x, c[2] + 0.05, this.z, Math.atan2(this.vx, this.vz) * 1, 1.3, 1.3, 1.3);
+          pen.set(i, this.x, c[2] + 0.05, this.z, Math.atan2(this.vx, this.vz) * 1, 1.7, 1.7, 1.7);
           if (i === n - 1) pen.done();
         };
         hz.update(0, 0); items.push(hz); list.push(hz);
