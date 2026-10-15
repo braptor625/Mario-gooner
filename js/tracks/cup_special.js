@@ -131,7 +131,18 @@
       b.box(f.x + f.rx * l, f.y + y, f.z + f.rz * l, th, th, th * 1.6, hd, c);
     }
   }
-  const objList = (kit) => kit.add(new (THREE.Group)());
+  // smooth vertical band (arch) across the road at distance d: ring between radii r0..r1, `depth` along the road
+  function arcBand(kit, b, d, r0, r1, depth, c, a0, a1, n, lift) {
+    const f = kit.frame(d), tx = f.tx * depth / 2, tz = f.tz * depth / 2;
+    const P = (r, a, s) => [f.x + f.rx * Math.cos(a) * r + tx * s, f.y + Math.sin(a) * r + (lift || 0), f.z + f.rz * Math.cos(a) * r + tz * s];
+    for (let i = 0; i < n; i++) {
+      const u0 = a0 + ((a1 - a0) * i) / n, u1 = a0 + ((a1 - a0) * (i + 1)) / n;
+      b.quad(P(r0, u0, 1), P(r1, u0, 1), P(r1, u1, 1), P(r0, u1, 1), c);
+      b.quad(P(r0, u0, -1), P(r0, u1, -1), P(r1, u1, -1), P(r1, u0, -1), c);
+      b.quad(P(r1, u0, 1), P(r1, u0, -1), P(r1, u1, -1), P(r1, u1, 1), c);
+      b.quad(P(r0, u0, 1), P(r0, u1, 1), P(r0, u1, -1), P(r0, u0, -1), c);
+    }
+  }
   // shared simple helpers for hazards
   const mkHazard = (kind, r) => ({ x: 0, y: 0, z: 0, radius: r, hitKind: kind, vx: 0, vz: 0, active: false, object3D: null });
   function sharedMesh(kit, geo, mat) { kit.trackGeom(geo); if (mat) kit.trackMat(mat); return new THREE.Mesh(geo, mat); }
@@ -346,7 +357,7 @@
 
       // ---- dense jungle
       const M = 17;
-      kit.scatter(330, 1, 60, M, (x, z, i, r) => {
+      kit.scatter(700, 1, 55, M - 1, (x, z, i, r) => {
         const s = 0.8 + r() * 1.1, tp = r();
         if (tp < 0.45) {
           b.frustum(x, gy, z, 0.9 * s, 0.5 * s, 6 * s, 6, trunkC, 0);
@@ -379,6 +390,7 @@
         b.frustum(x, gy - 6 + h * 0.8, z, R0 * 0.3, 0, h * 0.35, 7, mul(c, 1.15), 0);
       });
 
+      kit.mesh(b);
       // ---- stone walls & log fences along the road (bridge stretch left open)
       const wb = new kit.Batch();
       const sh = 3;
@@ -408,9 +420,8 @@
       });
       // fossil rib arches over the road
       for (const rd of [240, 1010]) {
-        for (let k = 0; k < 6; k++) hoop(kit, rb, rd + k * 3.4, 15 - Math.abs(k - 2.5) * 0.7, 1.0, 26, bone, -0.4);
-        const f0 = kit.frame(rd + 8.5);
-        for (let k = 0; k <= 5; k++) { const f = kit.frame(rd + k * 3.4), a = 14.2 - Math.abs(k - 2.5) * 0.7; rb.box(f.x, f.y + a - 0.4, f.z, 1.2, 1.0, 3.6, Math.atan2(f.tx, f.tz), bone); }
+        for (let k = 0; k < 6; k++) { const R0 = 15 - Math.abs(k - 2.5) * 0.7; arcBand(kit, rb, rd + k * 3.4, R0 - 1.0, R0, 0.9, bone, 0, Math.PI, 14, -0.3); }
+        for (let k = 0; k <= 4; k++) { const f = kit.frame(rd + k * 3.4 + 1.7), a = 14.4 - Math.abs(k - 2) * 0.8; rb.box(f.x, f.y + a - 0.3, f.z, 1.3, 1.1, 3.5, Math.atan2(f.tx, f.tz), bone); }
       }
       // entry gate to the start straight
       { const f = kit.frame(L - 10), hd = Math.atan2(f.tx, f.tz), wd = f.halfWidth + 5;
@@ -438,7 +449,7 @@
 
       // ---- rope bridge over the river
       const bb = new kit.Batch();
-      const plank = [col(0xa8793f), col(0x93672f), col(0xb8894a)];
+      const plank = [col(0x8a5f2d), col(0x76501f), col(0x94683a)];
       for (let d = DR.bridge[0]; d < DR.bridge[1] - 0.3; d += 1.2) {
         const e = d + 1.0, fa = kit.frame(d), fb = kit.frame(e), w = fa.halfWidth + 0.5;
         const k = plank[(((d / 1.2) | 0) * 7) % 3];
@@ -662,7 +673,7 @@
       kit.mesh(b);
       // ---- glowing (unlit) decor: neon hoops, pylons, helix core
       const g = new kit.Batch();
-      for (let k = 0; k < 9; k++) hoop(kit, g, L * (0.045 + k * 0.105) + (k % 2) * 13, 17, 1.7, 44, neon[k % neon.length], 0);
+      for (let k = 0; k < 9; k++) arcBand(kit, g, L * (0.045 + k * 0.105) + (k % 2) * 13, 15.4, 17.4, 1.4, neon[k % neon.length], -0.12, Math.PI + 0.12, 24, 0);
       // light pylons along the edges
       for (let d = 30; d < L - 20; d += 36) {
         const f = kit.frame(d);

@@ -137,6 +137,7 @@
   function tunnel(kit, b, o) {
     const step = o.step || 5, na = o.na || 12, y0 = o.y0 === undefined ? -3 : o.y0;
     const ringPts = (d, rx, h) => {
+      if (o.hf) h = o.hf(d) + (h - o.h);
       const f = kit.frame(d), out = [];
       const P = (l, y) => [f.x + f.rx * l, f.y + y, f.z + f.rz * l];
       out.push(P(-rx, y0));
@@ -999,7 +1000,7 @@
         for (let u = 70; u < SP.U - 24; u += 7) {
           const i = Math.round(u / 2), x = SP.sx[i], z = SP.sz[i], h = terrH(x, z), s = 0.8 + 0.9 * (SP.sw[i] / 32);
           const c = (Math.floor(u / 7) & 1) ? col(0xff9a3d) : col(0xffd23d);
-          b.frustum(x, h - 0.2, z, 1.9 * s, 0, 5.2 * s, 5, c, u);
+          b.frustum(x, h - 0.2, z, 1.35 * s, 0, 5.6 * s, 4, c, u);
         }
       }
       kit.mesh(b, {}, false);
@@ -1034,8 +1035,8 @@
         }
         const top = kit.at(dF, sd * (edge + 3.4), 18), base = kit.at(dF, sd * (edge + 3.4), 0.2);
         for (let k = -2; k <= 2; k++) {
-          const a = kit.at(dF + k * 2.6, sd * (edge + 3.2), 17), c = kit.at(dF + k * 2.6, sd * (edge + 3.2), 0.4);
-          wb.box(a[0], c[1], a[2], 2.2, a[1] - c[1], 1.2, hy, k & 1 ? col(0xdff6ff) : col(0xbfeaff));
+          const a = kit.at(dF + k * 3.4, sd * (edge + 1.6), 17), c = kit.at(dF + k * 3.4, sd * (edge + 1.6), 0.4);
+          wb.box(a[0], c[1], a[2], 3.2, a[1] - c[1], 1.4, hy, k & 1 ? col(0xdff6ff) : col(0xbfeaff));
         }
         const pool = kit.at(dF, sd * (edge + 1), 0.3);
         wb.blob(pool[0], pool[1], pool[2], 9, 0.5, 9, col(0xcdf2ff), 1);
@@ -1072,5 +1073,72 @@
       }
     };
   }
+
+  // ====================================================================================================
+  // COURSE 4 — BOULDER PEAK  (jungle valley -> barrel cannon -> summit road with rolling boulders -> rope bridge)
+  // ====================================================================================================
+  const PEAK_HW = 12, PEAK_SH = 4;
+  const PEAK = (function () {
+    const corners = [[120, 0, 60], [215, 75, 60], [420, 75, 80], [410, 335, 100], [170, 342, 70], [55, 240, 50], [240, 238, 38], [225, 150, 38], [-20, 150, 50], [-35, 0, 60]];
+    const base = polyPts(corners, { step: 40, startT: 0.3 });
+    const S0 = sampler(base), L = S0.L;
+    const dCan = S0.dOf(292, 75), canLen = 22, climb = 300, dTo = dCan + canLen + climb;
+    const dSumEnd = dTo + 70;
+    const H = 32;
+    const dBr = S0.dOf(105, 150), brHalf = 38;
+    const dBr0 = dBr - brHalf, dBr1 = dBr + brHalf;
+    const yAt = (d) => {
+      if (d < dCan + canLen) return 0;
+      if (d < dTo) return H * ((d - dCan - canLen) / climb);
+      if (d < dSumEnd) return H;
+      const t = clamp((d - dSumEnd) / (L - dSumEnd), 0, 1);
+      return H * (1 - sstep(0, 1, t));
+    };
+    const hwAt = (d) => {
+      const k = 1 - sstep(0, 14, Math.max(0, Math.max(dBr0 + 12 - d, d - (dBr1 - 12))));
+      return PEAK_HW - 5 * k;
+    };
+    const pts = base.map((p) => { const d = S0.dOf(p[0], p[1]); return [p[0], p[1], yAt(d), hwAt(d)]; });
+    return { pts, S: sampler(pts), dCan, canLen, dTo, dSumEnd, dBr0, dBr1, L, H, yAt };
+  })();
+
+  (function boulderPeak() {
+    const P = PEAK, L = P.L, S = P.S, dB = P.dBr0 + 12, dBe = P.dBr1 - 12;
+    G.defineTrack({
+      id: 'boulder_peak', name: 'Boulder Peak', cup: 'star', order: 4, laps: 3, music: 'mountain', seed: 5404,
+      hw: PEAK_HW, shoulder: PEAK_SH, scale: 1, style: 'meadow', offroad: 'grass', walls: 'none',
+      theme: {
+        sky: [0x3a86d8, 0xa9d8f2, 0xdcefe0], fog: [0xc6e2dc, 120, 560], ground: 0x2f7a35, shoulder: 0x6a8a3c,
+        road: [0x9a8566, 0x907c5f], curb: [0xd9c9a0, 0x8a6a3c], hemi: [0xe4f3ff, 0x6a8a50, 0.95], sun: [0xfff0d0, 0.9],
+        emb: 0x7a6040, bg: 0xc6e2dc,
+      },
+      pts: P.pts,
+      pads: [
+        { d: 36, len: 10, l: -5, w: 6 }, { d: 36, len: 10, l: 5, w: 6 },
+        { d: P.dTo + 160, len: 10, l: 0, w: 9 }, { d: P.dTo + 380, len: 10, l: -5, w: 7 }, { d: P.dBr1 + 80, len: 10, l: 0, w: 8 },
+      ],
+      jumps: [],
+      cannons: [{ d: P.dCan, len: P.canLen, l: 0, w: 2 * PEAK_HW, to: P.dTo, height: 42 }],
+      zones: [
+        // the climb is a hanging rope-and-plank causeway the karts fly over: stepping on it drops them back to the cannon
+        { d: P.dCan + P.canLen + 1, len: P.dTo - P.dCan - P.canLen - 8, l: 0, w: 2 * (PEAK_HW + PEAK_SH), surface: 'void', offroad: true, color: 0x7a5a32 },
+        // rope bridge: planks + open void on both sides
+        { d: dB, len: dBe - dB, l: 0, w: 14, surface: 'road', color: 0x9a6b3a },
+        { d: dB, len: dBe - dB, l: -(7 + 3.2), w: 6.4, surface: 'void', offroad: true, decal: false },
+        { d: dB, len: dBe - dB, l: 7 + 3.2, w: 6.4, surface: 'void', offroad: true, decal: false },
+      ],
+      itemRows: [
+        { d: P.dCan - 150, count: 5 }, { d: P.dCan - 80, count: 5, double: true },
+        { d: P.dTo + 60, count: 5 }, { d: P.dTo + 250, count: 5 }, { d: P.dTo + 470, count: 5, double: true },
+        { d: P.dBr1 + 60, count: 5 }, { d: L - 90, count: 5, double: true },
+      ],
+      decorate: peakDecor(P),
+      hazards: peakHazards(P),
+    });
+  })();
+
+  function peakDecor() { return function () {}; }
+  function peakHazards() { return function () { return []; }; }
+
   // @@END
 })();
