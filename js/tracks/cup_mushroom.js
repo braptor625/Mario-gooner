@@ -235,7 +235,7 @@
         for (let s = -1; s <= 1; s += 2) { const p = kit.at(t0, s * w, 0); b.box(p[0], p[1], p[2], 4.8, 13.4, 4.8, Math.atan2(kit.frame(t0).tx, kit.frame(t0).tz), col(0xe83a3a)); }
         for (let k = 0; k < 4; k++) {
           const p = kit.at(t0 + 10 + k * 16, 0, 0);
-          b.blob(p[0], p[1] + 11, p[2], 13, 6, 13, kit.mul(col(0x58b03c), 0.9 + k * 0.04), 1);
+          b.blob(p[0], p[1] + 14.6, p[2], 13, 3.6, 13, kit.mul(col(0x58b03c), 0.9 + k * 0.04), 1);
         }
         state.tunnel = [t0, t1];
       }
@@ -302,9 +302,9 @@
     id: 'coral_coast', name: 'Coral Coast', cup: 'mushroom', order: 2, laps: 3, music: 'beach',
     seed: 202, hw: 12, shoulder: 5, scale: 1, style: 'meadow', offroad: 'sand',
     theme: {
-      sky: [0x2a8fe8, 0xa9e3ff, 0xfff0c8], fog: [0xc6ecff, 200, 760], ground: 0xf0d89c, shoulder: 0xe8cf8c,
-      road: [0x8d8a88, 0x848180], curb: [0xff7a59, 0xfff3d6], hemi: [0xe6f6ff, 0xd9c590, 1.0], sun: [0xfff0d0, 0.95],
-      emb: 0xe3c680, bg: 0xc6ecff,
+      sky: [0x2a8fe8, 0xa9e3ff, 0xfff0c8], fog: [0xc6ecff, 200, 760], ground: 0xdcb872, shoulder: 0xd2ac66,
+      road: [0x6f6c6a, 0x676462], curb: [0xff7a59, 0xfff3d6], hemi: [0xdff1ff, 0xb59d6a, 0.72], sun: [0xfff0d0, 0.7],
+      emb: 0xd8b36c, bg: 0xc6ecff,
     },
     walls: 'fence', wallColors: [0xfff3d6, 0x3fb8c9],
     pts: [[0, 0, 0, 13], [120, 2], [240, -8], [340, -4], [415, 35], [430, 105], [400, 170], [340, 215],
@@ -429,7 +429,7 @@
       kit.scatter(150, 1, 60, m0 - 2, (x, z, i, r) => palm(b, kit, x, gy, z, 0.8 + r() * 0.6, r));
       kit.scatter(70, 1, 50, m0 - 4, (x, z, i, r) => b.blob(x, gy + 0.4, z, 1.2 + r(), 0.7 + r() * 0.5, 1.2 + r(), kit.mul(col(0x4cae4a), 0.85 + r() * 0.3), 0));
       kit.scatter(40, 2, 50, m0 - 4, (x, z, i, r) => b.blob(x, gy + 0.3, z, 0.9 + r() * 0.8, 0.5, 0.9 + r() * 0.8, kit.mix(col(0xf5b6c8), col(0xffd86a), r()), 0));
-      kit.farScatter(24, 90, (x, z, r) => {
+      kit.farScatter(24, 135, (x, z, r) => {
         const s = 26 + r() * 36;
         b.blob(x, gy - 4, z, s * 1.4, s * 0.5, s, kit.mul(col(0x7ac66a), 0.9 + r() * 0.2), 1);
       });
@@ -454,7 +454,7 @@
       for (const [d, ph, kind] of defs) {
         frameInto(kit, d, o);
         const f = { x: o.x, y: o.y, z: o.z, rx: o.rx, rz: o.rz, tx: o.tx, tz: o.tz };
-        const mesh = new THREE.Mesh(geo, mat), grp = new THREE.Group(); grp.add(mesh);
+        const mesh = new THREE.Mesh(geo, mat), grp = new THREE.Group(); mesh.scale.setScalar(1.5); grp.add(mesh);
         const A = 15.5, w = 0.42, h = {
           x: f.x, y: f.y, z: f.z, radius: 1.7, hitKind: kind, vx: 0, vz: 0, active: true, object3D: grp,
           update(dt, time) {

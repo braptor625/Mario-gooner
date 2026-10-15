@@ -395,7 +395,7 @@
           r.set(clamp(Math.round((r.get() + d * 0.1) * 10) / 10, 0, 1)); paint(); snd('menu_move');
           return true;
         }
-        if (r.type === 'choice') {
+        if (r.choices) {
           const cs = r.choices; let ci = cs.findIndex((c) => c.v === r.get());
           let n = ci;
           do { n += d; } while (n >= 0 && n < cs.length && cs[n].lock);
