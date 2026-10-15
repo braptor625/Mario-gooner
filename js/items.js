@@ -81,6 +81,19 @@
         '<path d="M22 44 Q32 22 42 44 Z" fill="#1d4bb0" ' + ST + '/>' +
         '<rect x="6" y="42" width="52" height="12" rx="6" fill="#fff4d6" ' + ST + '/>'),
     },
+    shell_triple: {
+      name: 'Triple Shell', color: '#2fbf4a', kind: 'projectile', icon: shellIcon('#2fbf4a', '#1f8f37', 3),
+    },
+    chomp: {
+      name: 'Chain Biter', color: '#2b2f45', kind: 'special',
+      icon: svg('<circle cx="30" cy="34" r="22" fill="#20222f" ' + ST + '/>' +
+        '<path d="M14 26 A18 18 0 0 1 26 15" fill="none" stroke="#8d96c4" stroke-width="4" stroke-linecap="round"/>' +
+        '<ellipse cx="22" cy="28" rx="5" ry="6.5" fill="#fff"/><ellipse cx="37" cy="28" rx="5" ry="6.5" fill="#fff"/>' +
+        '<circle cx="23" cy="30" r="2.4" fill="#1b1b2f"/><circle cx="36" cy="30" r="2.4" fill="#1b1b2f"/>' +
+        '<path d="M13 41 Q30 56 47 41 Z" fill="#fff" ' + ST + '/>' +
+        '<polygon points="18,43 21,50 24,44" fill="#fff" ' + ST.replace('3', '1.5') + '/>' +
+        '<g fill="none" stroke="#9aa0b8" stroke-width="3"><ellipse cx="55" cy="13" rx="5" ry="3"/><ellipse cx="59" cy="22" rx="3" ry="5"/></g>'),
+    },
     fireball: {
       name: 'Fireballs', color: '#ff6a1a', kind: 'projectile',
       icon: svg('<path d="M32 4 C40 18 54 24 52 40 C50 54 40 60 32 60 C22 60 12 54 12 42 C12 32 20 28 22 18 C28 22 30 14 32 4 Z" fill="#ff6a1a" ' + ST + '/>' +
@@ -113,6 +126,7 @@
 
   // ------------------------------------------------------------------ tables
   const COUNT = { shell_green3: 3, shell_red3: 3, mushroom3: 3 };
+  function resolveId(id) { return id === 'shell_triple' ? (Math.random() < 0.5 ? 'shell_green3' : 'shell_red3') : id; }
   const DRAGGABLE = {
     banana: 1, giant_banana: 1, fake_box: 1, bomb: 1, shell_green: 1, shell_red: 1, egg: 1, mega_shell: 1,
   };
@@ -126,7 +140,7 @@
     banana: { n: 20, r: 1.2, ground: true },
     giant_banana: { n: 3, r: 2.4, ground: true },
     fake_box: { n: 8, r: 1.5, ground: true },
-    bomb: { n: 8, r: 1.8 },
+    bomb: { n: 16, r: 1.8 },
     shell_green: { n: 16, r: 1.6 },
     shell_red: { n: 16, r: 1.6 },
     spiny: { n: 3, r: 1.6 },
@@ -137,25 +151,30 @@
   const ABSORB_GIVES = { banana: 'banana', giant_banana: 'banana', fake_box: 'fake_box', shell_green: 'shell_green', shell_red: 'shell_red' };
   const TEMP_BOXES = 12;
   const MAX_EXPL = 8;
+  const BOX_RESPAWN = 1.5;
 
-  // distribution anchors (front / mid / back)
-  const W_FRONT = { banana: 35, shell_green: 30, fake_box: 15, shell_red: 10, mushroom: 12, bomb: 3 };
-  const W_MID = {
-    banana: 12, shell_green: 12, fake_box: 6, shell_red: 18, shell_red3: 12, shell_green3: 12,
-    mushroom: 16, mushroom3: 12, bomb: 8, star: 3,
-  };
-  const W_BACK = {
-    mushroom: 18, mushroom3: 18, shell_red: 8, shell_red3: 10, bomb: 6, star: 14, mushroom_gold: 12,
-    shell_green3: 4, banana: 3,
-  };
-  const ALL_KEYS = ['banana', 'shell_green', 'shell_green3', 'shell_red', 'shell_red3', 'mushroom', 'mushroom3',
-    'mushroom_gold', 'star', 'fake_box', 'bomb'];
+  // DD-style distribution anchors (front / mid / back). Specials are added per slot owner.
+  const W_FRONT = { banana: 30, shell_green: 28, fake_box: 16, mushroom: 8, shell_red: 6 };
+  const W_MID = { shell_red: 22, mushroom: 22, shell_green: 14, banana: 10, fake_box: 8, star: 3 };
+  const W_BACK = { mushroom: 22, star: 18, shell_red: 14, shell_green: 6, banana: 3, fake_box: 3 };
+  const W_BATTLE = { shell_green: 20, shell_red: 20, banana: 18, mushroom: 14, fake_box: 8, star: 8 };
+  const ALL_KEYS = ['banana', 'shell_green', 'shell_red', 'mushroom', 'fake_box', 'star'];
+  const SPECIALS = ['fireball', 'heart', 'egg', 'giant_banana', 'mega_shell', 'bomb', 'shell_triple', 'chomp', 'mushroom_gold'];
+  const DROP_LIFE = 15;
+  const MAX_DROPS = 32;
+  const MAX_CHOMPS = 8;
+  const CHOMP_TIME = 6;
 
   function wrapLen(d, len) { d %= len; return d < 0 ? d + len : d; }
 
   // ------------------------------------------------------------------ system
   class ItemSystem {
-    constructor(scene, track, karts) {
+    constructor(scene, track, karts, opts) {
+      opts = opts || {};
+      this.mode = opts.mode || 'race';
+      this.boxesOn = opts.boxes !== false;
+      this.isArena = !!(track && track.isArena);
+      this._disposed = false;
       this.scene = scene;
       this.track = track;
       this.karts = karts || [];
@@ -177,7 +196,11 @@
       this._buildBoxes();
       this._buildEntities();
       this._buildExplosions();
+      this._buildDrops();
+      this._buildChomps();
       for (let i = 0; i < this.karts.length; i++) this._initKart(this.karts[i]);
+      this._onLost = (d) => this._handleLost(d);
+      G.events.on('kartLostItems', this._onLost);
     }
 
     // ------------------------------------------------------------ assets
@@ -361,16 +384,33 @@
       this.fakeMat = this._track(new THREE.MeshBasicMaterial({
         map: mapB, vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false,
       }));
-      const spots = (this.track && this.track.itemBoxSpots) || [];
-      const n = spots.length;
+      const spots = (this.boxesOn && this.track && this.track.itemBoxSpots) || [];
+      let n = 0;
+      for (let i = 0; i < spots.length; i++) n += spots[i].double ? 2 : 1;
       this.nSpots = n;
       const N = n + TEMP_BOXES;
       this.nBoxes = N;
       this.bx = new Float32Array(N); this.by = new Float32Array(N); this.bz = new Float32Array(N);
       this.bS = new Float32Array(N); this.bR = new Float32Array(N); this.bL = new Float32Array(N);
       this.bAct = new Uint8Array(N);
-      for (let i = 0; i < n; i++) {
-        this.bx[i] = spots[i].x; this.by[i] = spots[i].y || 0; this.bz[i] = spots[i].z;
+      this.bPair = new Int16Array(N).fill(-1);
+      this.bDbl = new Uint8Array(N);
+      let j = 0;
+      for (let i = 0; i < spots.length; i++) {
+        const sp = spots[i], y = sp.y || 0;
+        if (sp.double) {
+          let rx = 1, rz = 0;
+          const q = this.track.query && this.track.query(sp.x, sp.z, -1, y);
+          if (q && isFinite(q.rx) && isFinite(q.rz) && (q.rx || q.rz)) { rx = q.rx; rz = q.rz; }
+          for (let s = 0; s < 2; s++) {
+            const o = s ? 1.15 : -1.15;
+            this.bx[j + s] = sp.x + rx * o; this.bz[j + s] = sp.z + rz * o; this.by[j + s] = y;
+            this.bPair[j + s] = j + 1 - s; this.bDbl[j + s] = 1;
+          }
+          j += 2;
+        } else {
+          this.bx[j] = sp.x; this.by[j] = y; this.bz[j] = sp.z; j++;
+        }
       }
       this.boxMesh = new THREE.InstancedMesh(A.g.cubeRainbow, this.boxMat, N);
       this.boxMesh.frustumCulled = false;
@@ -397,7 +437,7 @@
         te[o + 4] = 0; te[o + 5] = s; te[o + 6] = 0; te[o + 7] = 0;
         te[o + 8] = sn; te[o + 9] = 0; te[o + 10] = c; te[o + 11] = 0;
         te[o + 12] = this.bx[i];
-        te[o + 13] = this.by[i] + 1.15 + Math.sin(t * 2.2 + i) * 0.15;
+        te[o + 13] = this.by[i] + 1.15 + Math.sin(t * 2.2 + (this.bDbl[i] ? 0 : i)) * 0.15;
         te[o + 14] = this.bz[i]; te[o + 15] = 1;
       }
       this.boxMesh.instanceMatrix.needsUpdate = true;
@@ -419,7 +459,7 @@
         }
       }
       const total = this.ents.length;
-      for (let i = 0; i < total; i++) this._hzPool.push({ x: 0, z: 0, radius: 0, kind: '' });
+      for (let i = 0; i < total + MAX_CHOMPS; i++) this._hzPool.push({ x: 0, z: 0, radius: 0, kind: '' });
     }
 
     _buildExplosions() {
@@ -432,13 +472,277 @@
       }
     }
 
+    // ------------------------------------------------------------ dropped-item pickups
+    _dropTexture(id) {
+      this._dropMats = this._dropMats || {};
+      let m = this._dropMats[id];
+      if (m) return m;
+      const c = document.createElement('canvas');
+      c.width = 128; c.height = 128;
+      const ctx = c.getContext('2d');
+      const tex = this._track(new THREE.CanvasTexture(c));
+      // backing disc so the icon reads against any ground
+      ctx.fillStyle = 'rgba(20,22,40,0.55)';
+      ctx.beginPath(); ctx.arc(64, 64, 60, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = 5; ctx.strokeStyle = '#ffffff'; ctx.stroke();
+      const def = G.ITEMS[id];
+      if (def && def.icon && typeof Image !== 'undefined') {
+        const img = new Image();
+        img.onload = () => { ctx.drawImage(img, 20, 20, 88, 88); tex.needsUpdate = true; };
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(def.icon);
+      }
+      m = this._track(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+      this._dropMats[id] = m;
+      return m;
+    }
+
+    _buildDrops() {
+      this.drops = [];
+      for (let i = 0; i < MAX_DROPS; i++) {
+        const spr = new THREE.Sprite(this._dropTexture('banana'));
+        spr.visible = false;
+        this._root.add(spr);
+        this.drops.push({ active: false, id: null, spr: spr, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, hint: -1, from: null, base: 0 });
+      }
+    }
+
+    _spawnDrop(id, x, y, z, vx, vz, from) {
+      let d = null, oldest = null;
+      for (let i = 0; i < this.drops.length; i++) {
+        const c = this.drops[i];
+        if (!c.active) { d = c; break; }
+        if (!oldest || c.age > oldest.age) oldest = c;
+      }
+      if (!d) d = oldest;
+      d.active = true; d.id = id; d.x = x; d.y = y; d.z = z; d.vx = vx; d.vz = vz; d.vy = 9;
+      d.age = 0; d.hint = -1; d.from = from || null;
+      d.spr.material = this._dropTexture(id);
+      d.spr.visible = true;
+      d.spr.position.set(x, y + 1.5, z);
+      return d;
+    }
+
+    _scatterDrops(k, ids) {
+      const m = ids.length;
+      const h = k.heading, ky = this._kartY(k);
+      for (let i = 0; i < m; i++) {
+        const a = h + Math.PI + (i - (m - 1) / 2) * 0.8 + (Math.random() - 0.5) * 0.4;
+        const sp = 7 + Math.random() * 5;
+        const sx = Math.sin(a), sz = Math.cos(a);
+        this._spawnDrop(ids[i], k.pos.x + sx * 1.5, ky + 0.8, k.pos.z + sz * 1.5, sx * sp + (k.vel ? k.vel.x * 0.3 : 0), sz * sp + (k.vel ? k.vel.z * 0.3 : 0), k);
+      }
+    }
+
+    _updateDrops(dt) {
+      const ds = this.drops, ks = this.karts, t = this.t;
+      for (let i = 0; i < ds.length; i++) {
+        const d = ds[i];
+        if (!d.active) continue;
+        d.age += dt;
+        if (d.age >= DROP_LIFE) { d.active = false; d.spr.visible = false; continue; }
+        const q = this.track.query(d.x, d.z, d.hint);
+        d.hint = q.index;
+        const gy = q.surface === 'void' ? d.y - 1 : q.y;
+        if (d.vy !== 0 || d.age < 1) {
+          d.vy -= 26 * dt;
+          d.x += d.vx * dt; d.z += d.vz * dt; d.y += d.vy * dt;
+          d.vx *= 1 - Math.min(1, dt * 1.5); d.vz *= 1 - Math.min(1, dt * 1.5);
+          const lim = (q.wallDist || q.halfWidth + 2) - 0.8;
+          if (Math.abs(q.lateral) > lim) {
+            const sgn = q.lateral > 0 ? 1 : -1, over = Math.abs(q.lateral) - lim;
+            d.x -= q.rx * sgn * over; d.z -= q.rz * sgn * over;
+            d.vx *= 0.3; d.vz *= 0.3;
+          }
+          if (d.y <= gy + 0.8 && d.vy < 0) {
+            d.y = gy + 0.8;
+            if (d.vy < -4) d.vy = -d.vy * 0.4; else { d.vy = 0; d.vx = d.vz = 0; }
+          }
+        }
+        // pickup
+        if (d.age > 0.6) {
+          for (let ki = 0; ki < ks.length; ki++) {
+            const k = ks[ki];
+            if (k.finished || k.falling) continue;
+            if (k === d.from && d.age < 2) continue;
+            const slot = this._freeSlot(k);
+            if (slot < 0) continue;
+            if (this.mode === 'bomb' && d.id !== 'bomb') continue;
+            const dx = k.pos.x - d.x, dz = k.pos.z - d.z;
+            if (dx * dx + dz * dz > 5.0 || Math.abs(this._kartY(k) - d.y) > 4) continue;
+            k.heldItems[slot] = d.id; k.itemCounts[slot] = COUNT[d.id] || 1; k.roulette[slot] = 0;
+            if (k._itm) k._itm.pend[slot] = null;
+            this._snd('item_get', k);
+            d.active = false; d.spr.visible = false;
+            break;
+          }
+          if (!d.active) continue;
+        }
+        const spin = Math.abs(Math.cos(t * 3 + i));
+        const blink = d.age > DROP_LIFE - 3 && ((t * 8) | 0) % 2 === 0;
+        const sc = blink ? 0.001 : 2.4;
+        d.spr.scale.set(Math.max(0.35, spin) * sc, sc, 1);
+        d.spr.position.set(d.x, d.y + 0.7 + (d.vy === 0 ? Math.sin(t * 3 + i) * 0.2 : 0), d.z);
+      }
+    }
+
+    _handleLost(data) {
+      if (this._disposed || !data) return;
+      const k = data.kart || data;
+      if (!k || !k.heldItems || this.karts.indexOf(k) < 0) return;
+      const st = k._itm;
+      let ids = data.items;
+      if (!ids || !ids.length) {
+        ids = [];
+        if (st && st.snap) { if (st.snap[0]) ids.push(st.snap[0]); if (st.snap[1]) ids.push(st.snap[1]); }
+      }
+      if (st) {
+        if (st.dragEnt) { const e = st.dragEnt; st.dragEnt = null; e.owner = null; this._free(e); }
+        st.pend[0] = st.pend[1] = null; st.pressed = false; st.goldT = 0;
+        st.snap[0] = st.snap[1] = null;
+      }
+      k.draggedItem = null;
+      const out = [];
+      for (let i = 0; i < ids.length; i++) if (ids[i] && G.ITEMS[ids[i]]) out.push(resolveId(ids[i]));
+      if (out.length) this._scatterDrops(k, out);
+    }
+
+    // ------------------------------------------------------------ chomp
+    _buildChomps() {
+      this.chomps = [];
+      for (let i = 0; i < MAX_CHOMPS; i++) this.chomps.push({ active: false, grp: null, links: null, owner: null, hitT: new Float32Array(Math.max(1, this.karts.length)), t: 0 });
+    }
+
+    _makeChompMesh(c) {
+      const g = new THREE.Group();
+      const body = new THREE.Mesh(this._geo(new THREE.SphereGeometry(1.5, 18, 14)), this._track(new THREE.MeshPhongMaterial({ color: 0x0b0b12, specular: 0xffffff, shininess: 120 })));
+      g.add(body);
+      const white = this._mat(0xffffff), black = this._mat(0x05050a);
+      const eg = this._geo(new THREE.SphereGeometry(0.42, 10, 8)), pg = this._geo(new THREE.SphereGeometry(0.2, 8, 6));
+      for (let s = -1; s <= 1; s += 2) {
+        const e = new THREE.Mesh(eg, white); e.position.set(s * 0.6, 0.65, 1.05); g.add(e);
+        const p = new THREE.Mesh(pg, black); p.position.set(s * 0.6, 0.65, 1.42); g.add(p);
+      }
+      const mouth = new THREE.Mesh(this._geo(new THREE.CircleGeometry(0.85, 16)), this._mat(0x6a0f1a));
+      mouth.position.set(0, -0.35, 1.47); mouth.scale.set(1, 0.55, 1); g.add(mouth);
+      const tg = this._geo(new THREE.ConeGeometry(0.17, 0.5, 6));
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        const th = new THREE.Mesh(tg, white);
+        th.position.set(Math.cos(a) * 0.82, -0.35 + Math.sin(a) * 0.46, 1.5);
+        th.rotation.x = Math.PI / 2;
+        g.add(th);
+      }
+      c.links = [];
+      const lg = this._geo(new THREE.SphereGeometry(0.2, 8, 6)), lm = this._mat(0x4a4f68);
+      for (let i = 0; i < 7; i++) { const l = new THREE.Mesh(lg, lm); this._root.add(l); c.links.push(l); l.visible = false; }
+      g.visible = false;
+      this._root.add(g);
+      c.grp = g;
+    }
+
+    _startChomp(k, st) {
+      let c = null;
+      for (let i = 0; i < this.chomps.length; i++) if (!this.chomps[i].active) { c = this.chomps[i]; break; }
+      if (!c) return;
+      if (!c.grp) this._makeChompMesh(c);
+      c.active = true; c.owner = k; c.t = 0; c.hitT.fill(-10);
+      st.chompT = CHOMP_TIME; st.chompE = c;
+      st.chompDirect = !('autoSteer' in k);
+      k.chompTimer = CHOMP_TIME;
+      c.grp.visible = true;
+      for (let i = 0; i < c.links.length; i++) c.links[i].visible = true;
+      this._snd('boost', k);
+    }
+
+    _stopChomp(k, st) {
+      const c = st.chompE;
+      if (c) {
+        c.active = false; c.owner = null;
+        if (c.grp) c.grp.visible = false;
+        if (c.links) for (let i = 0; i < c.links.length; i++) c.links[i].visible = false;
+      }
+      st.chompE = null; st.chompT = 0;
+      k.chompTimer = 0;
+      if ('autoSteer' in k) k.autoSteer = null;
+    }
+
+    _tickChomp(k, st, dt) {
+      if (st.chompT <= 0) return;
+      st.chompT -= dt;
+      const c = st.chompE;
+      if (st.chompT <= 0 || k.finished || k.falling || !c) { this._stopChomp(k, st); return; }
+      k.chompTimer = st.chompT;
+      c.t += dt;
+      // steering target
+      let tx = 0, tz = 0, have = false;
+      if (this.isArena) {
+        let best = null, bd = 1e9;
+        for (let i = 0; i < this.karts.length; i++) {
+          const o = this.karts[i];
+          if (o === k || o.finished) continue;
+          const dx = o.pos.x - k.pos.x, dz = o.pos.z - k.pos.z, d2 = dx * dx + dz * dz;
+          if (d2 < bd) { bd = d2; best = o; }
+        }
+        if (best) { tx = best.pos.x; tz = best.pos.z; have = true; }
+      } else {
+        const ti = k.trackInfo;
+        const dist = ti && ti.dist !== undefined ? ti.dist : 0;
+        const p = this.track.pointAt(wrapLen(dist + 20, this.track.length));
+        tx = p.x; tz = p.z; have = true;
+      }
+      let steer = 0;
+      if (have) {
+        const want = Math.atan2(tx - k.pos.x, tz - k.pos.z);
+        const err = G.wrapAngle(want - k.heading);
+        steer = G.clamp(-err * 2.2, -1, 1);
+        if (st.chompDirect) k.heading += G.clamp(err, -2.6 * dt, 2.6 * dt);
+      }
+      if (!st.chompDirect) k.autoSteer = steer;
+      // forward speed ~1.4x top, invulnerable while chomping
+      if (k._boost) k._boost(0.12, 1.15, false); else if (k.boost) k.boost(0.12, 1.15);
+      if (k.invulnTimer < 0.25) k.invulnTimer = 0.25;
+      // visuals
+      const fx = Math.sin(k.heading), fz = Math.cos(k.heading), ky = this._kartY(k);
+      const lunge = 5.2 + Math.sin(c.t * 7) * 0.7;
+      const hop = 1.5 + Math.abs(Math.sin(c.t * 5)) * 0.8;
+      const cx = k.pos.x + fx * lunge, cz = k.pos.z + fz * lunge, cy = ky + hop;
+      c.grp.position.set(cx, cy, cz);
+      c.grp.rotation.y = k.heading;
+      c.grp.rotation.x = Math.sin(c.t * 5) * 0.12;
+      const sx = k.pos.x + fx * 1.3, sz = k.pos.z + fz * 1.3, sy = ky + 0.6, n = c.links.length;
+      for (let i = 0; i < n; i++) {
+        const f = (i + 1) / (n + 1);
+        c.links[i].position.set(sx + (cx - fx * 1.3 - sx) * f, sy + (cy - sy) * f - Math.sin(f * Math.PI) * 0.5, sz + (cz - fz * 1.3 - sz) * f);
+      }
+      // collisions: flip karts, destroy items
+      for (let i = 0; i < this.karts.length; i++) {
+        const o = this.karts[i];
+        if (o === k) continue;
+        const dx = o.pos.x - cx, dz = o.pos.z - cz;
+        if (dx * dx + dz * dz > 3.6 * 3.6 || Math.abs(this._kartY(o) - ky) > 3.5) continue;
+        if (c.t - c.hitT[i] < 1.5) continue;
+        if (o.isInvincible && o.isInvincible()) continue;
+        c.hitT[i] = c.t;
+        this._hitKart(o, 'flip', k, 'chomp');
+        this._snd('shell_hit', o);
+      }
+      const ents = this.ents;
+      for (let i = 0; i < ents.length; i++) {
+        const e = ents[i];
+        if (!e.active || e.state === 'drag' || e.owner === k) continue;
+        const dx = e.x - cx, dz = e.z - cz, rr = 3.4 + e.radius;
+        if (dx * dx + dz * dz > rr * rr) continue;
+        if (e.kind === 'bomb') this._detonate(e); else if (e.kind !== 'mega_shell') this._free(e);
+      }
+    }
+
     // ------------------------------------------------------------ kart state
     _initKart(k) {
       if (k._itm && k._itm.sys === this) return;
       const st = {
         sys: this, kart: k, pend: [null, null], pressed: false, pressId: null, holdT: 0, dragEnt: null,
         goldT: 0, goldCd: 0, heartT: 0, hearts: 0, src: '', orbG: null, orbR: null, heartM: null,
-        orbShown: 0, orbType: '', hook: null,
+        orbShown: 0, orbType: '', hook: null, snap: [null, null], chompT: 0, chompE: null, chompDirect: false,
       };
       const sys = this;
       st.hook = function (kind) {
@@ -555,31 +859,38 @@
     }
 
     _decide(k, slot) {
+      if (this.mode === 'bomb') return 'bomb';
       const n = Math.max(1, this.karts.length);
       const p = G.clamp(k.position || Math.ceil(n / 2), 1, n);
       const t = n > 1 ? (p - 1) / (n - 1) : 0;
       const w = this._w;
       for (const key in w) delete w[key];
-      let A, B, f;
-      if (t < 0.5) { A = W_FRONT; B = W_MID; f = t * 2; } else { A = W_MID; B = W_BACK; f = (t - 0.5) * 2; }
-      for (let i = 0; i < ALL_KEYS.length; i++) {
-        const key = ALL_KEYS[i];
-        w[key] = (A[key] || 0) * (1 - f) + (B[key] || 0) * f;
+      const battle = this.mode === 'balloon' || this.mode === 'shine';
+      let total = 0;
+      if (battle) {
+        for (let i = 0; i < ALL_KEYS.length; i++) { const key = ALL_KEYS[i]; w[key] = W_BATTLE[key] || 0; total += w[key]; }
+      } else {
+        let A, B, f;
+        if (t < 0.5) { A = W_FRONT; B = W_MID; f = t * 2; } else { A = W_MID; B = W_BACK; f = (t - 0.5) * 2; }
+        for (let i = 0; i < ALL_KEYS.length; i++) {
+          const key = ALL_KEYS[i];
+          w[key] = (A[key] || 0) * (1 - f) + (B[key] || 0) * f;
+          total += w[key];
+        }
+        // rare, last-places-only items
+        if (n >= 4 && p >= n - 2 && !this._inUse('lightning')) { w.lightning = 4; total += 4; }
+        if (n >= 4 && p >= n - 3 && !this._inUse('spiny')) { w.spiny = 3; total += 3; }
       }
-      if (n >= 4 && p >= n - 1) w.lightning = 5;
-      if (n >= 6 && p >= 5) w.spiny = 6;
-      if (w.lightning && this._inUse('lightning')) w.lightning = 0;
-      if (w.spiny && this._inUse('spiny')) w.spiny = 0;
-      const sp = this._specialFor(slot === 0 ? k.rear : k.front);
-      if (sp && ITEMS_HAS(sp)) {
-        w[sp] = (w[sp] || 0) + (t < 0.34 ? 8 : 18);
-      }
-      return G.weighted(w);
+      let sp = this._specialFor(slot === 0 ? k.rear : k.front);
+      if (sp === 'all') sp = SPECIALS[(Math.random() * SPECIALS.length) | 0];
+      if (sp && ITEMS_HAS(sp)) w[sp] = (w[sp] || 0) + total * (t < 0.34 && !battle ? 0.22 : 0.27);
+      return resolveId(G.weighted(w));
     }
 
     // ------------------------------------------------------------ public API
     giveItem(k, id, slot) {
       slot = slot || 0;
+      id = resolveId(id);
       k.heldItems[slot] = id; k.itemCounts[slot] = COUNT[id] || 1; k.roulette[slot] = 0;
       if (k._itm) k._itm.pend[slot] = null;
     }
@@ -593,6 +904,12 @@
         const h = pool[n++];
         h.x = e.x; h.z = e.z; h.radius = e.radius; h.kind = e.kind;
       }
+      for (let i = 0; i < this.chomps.length; i++) {
+        const c = this.chomps[i];
+        if (!c.active || !c.grp) continue;
+        const h = pool[n++];
+        h.x = c.grp.position.x; h.z = c.grp.position.z; h.radius = 3.4; h.kind = 'chomp';
+      }
       out.length = n;
       for (let i = 0; i < n; i++) out[i] = pool[i];
       return out;
@@ -601,6 +918,7 @@
     reset() {
       for (let i = 0; i < this.ents.length; i++) this._free(this.ents[i]);
       for (let i = 0; i < this.expl.length; i++) { this.expl[i].active = false; this.expl[i].mesh.visible = false; }
+      for (let i = 0; i < this.drops.length; i++) { this.drops[i].active = false; this.drops[i].spr.visible = false; }
       this._resetBoxes();
       this.lightningTimer = 0;
       this.t = 0;
@@ -609,7 +927,8 @@
         this._initKart(k);
         const st = k._itm;
         st.pend[0] = st.pend[1] = null; st.pressed = false; st.dragEnt = null; st.goldT = 0; st.heartT = 0;
-        st.hearts = 0; st.orbShown = 0; st.src = '';
+        st.hearts = 0; st.orbShown = 0; st.src = ''; st.snap[0] = st.snap[1] = null;
+        if (st.chompE) this._stopChomp(k, st);
         k.draggedItem = null;
         if (k.onBeforeHit == null) k.onBeforeHit = st.hook;
         if (st.orbG) {
@@ -621,6 +940,12 @@
     }
 
     dispose() {
+      this._disposed = true;
+      if (this._onLost) G.events.off('kartLostItems', this._onLost);
+      for (let i = 0; i < this.karts.length; i++) {
+        const st = this.karts[i]._itm;
+        if (st && st.sys === this && st.chompE) this._stopChomp(this.karts[i], st);
+      }
       if (this._root.parent) this._root.parent.remove(this._root);
       for (let i = 0; i < this._disposables.length; i++) {
         const d = this._disposables[i];
@@ -652,11 +977,17 @@
         this._tickRoulette(k, st, dt);
         this._tickInput(k, st, dt);
         this._tickTimers(k, st, dt);
+        this._tickChomp(k, st, dt);
       }
       this._updateEnts(dt);
       this._collide(dt);
+      this._updateDrops(dt);
       this._updateExplosions(dt);
       this._updateOrbits(dt);
+      for (let i = 0; i < ks.length; i++) {
+        const k = ks[i], st = k._itm;
+        if (st) { st.snap[0] = k.heldItems[0]; st.snap[1] = k.heldItems[1]; }
+      }
     }
 
     // ---- boxes
@@ -678,17 +1009,19 @@
       for (let ki = 0; ki < ks.length; ki++) {
         const k = ks[ki];
         if (k.finished || k.falling) continue;
-        if (this._freeSlot(k) < 0) continue;
+        if (!this._canPickup(k)) continue;
         const px = k.pos.x, pz = k.pos.z, py = this._kartY(k);
         for (let i = 0; i < N; i++) {
           if (!this.bAct[i] || this.bS[i] < 0.7) continue;
           const dx = this.bx[i] - px, dz = this.bz[i] - pz;
           if (dx * dx + dz * dz > 3.24) continue;
           if (Math.abs(this.by[i] - py) > 4) continue;
+          const pr = this.bPair[i], dbl = pr >= 0 && this.bAct[pr];
           this.bAct[i] = 0;
-          this.bR[i] = i < n ? 3.0 : -1;
-          this._pickup(k);
-          if (this._freeSlot(k) < 0) break;
+          this.bR[i] = i < n ? BOX_RESPAWN : -1;
+          if (dbl) { this.bAct[pr] = 0; this.bR[pr] = BOX_RESPAWN; }
+          this._pickup(k, dbl ? 2 : 1);
+          if (!this._canPickup(k)) break;
         }
       }
       this._writeBoxMatrices();
@@ -701,15 +1034,31 @@
       return -1;
     }
 
-    _pickup(k) {
-      const s = this._freeSlot(k);
-      if (s < 0) return;
+    _canPickup(k) {
+      if (this.mode === 'bomb') {
+        const h = k.heldItems[0];
+        return (h == null && !(k.roulette[0] > 0)) || (h === 'bomb' && (k.itemCounts[0] || 1) < 5 && !(k.roulette[0] > 0));
+      }
+      return this._freeSlot(k) >= 0;
+    }
+
+    _pickup(k, count) {
       const st = k._itm;
-      st.pend[s] = this._decide(k, s);
-      k.roulette[s] = 1.5;
-      st.rouletteTick = 0;
-      this._snd('item_box', k);
-      this._snd('roulette', k);
+      if (this.mode === 'bomb') {
+        if (k.heldItems[0] === 'bomb') k.itemCounts[0] = Math.min(5, (k.itemCounts[0] || 1) + 1);
+        else { k.heldItems[0] = 'bomb'; k.itemCounts[0] = 1; }
+        this._snd('item_box', k); this._snd('item_get', k);
+        return;
+      }
+      let n = count || 1;
+      for (let i = 0; i < n; i++) {
+        const s = this._freeSlot(k);
+        if (s < 0) break;
+        st.pend[s] = this._decide(k, s);
+        k.roulette[s] = 1.5 + i * 0.35;
+        this._snd('item_box', k);
+        this._snd('roulette', k);
+      }
     }
 
     _spawnTempBoxes(x, z, y) {
@@ -745,7 +1094,7 @@
         }
         if (k.roulette[s] <= 0) {
           k.roulette[s] = 0;
-          const id = st.pend[s];
+          const id = st.pend[s] ? resolveId(st.pend[s]) : null;
           st.pend[s] = null;
           if (id) {
             let slot = s;
@@ -820,6 +1169,7 @@
 
     _useGoldTap(k, st) {
       if (st.goldCd > 0) return;
+      G.events.emit('itemUsed', { kart: k, item: 'mushroom_gold' });
       st.goldCd = 0.3;
       if (k.boost) k.boost(0.7);
       this._snd('boost', k);
@@ -834,6 +1184,7 @@
 
     _throwHeld(k, st, id, back) {
       if (!id) return;
+      G.events.emit('itemUsed', { kart: k, item: id });
       let e = st.dragEnt;
       if (e) { st.dragEnt = null; k.draggedItem = null; e.heldId = null; }
       else e = this._spawn(ENT_OF[id]);
@@ -888,7 +1239,24 @@
       }
     }
 
+    _nearestKart(x, z, except, fx, fz, cone) {
+      const ks = this.karts;
+      let best = null, bd = 1e9;
+      for (let i = 0; i < ks.length; i++) {
+        const o = ks[i];
+        if (o === except || o.finished) continue;
+        const dx = o.pos.x - x, dz = o.pos.z - z, d2 = dx * dx + dz * dz;
+        if (cone && d2 > 1e-6 && (dx * fx + dz * fz) / Math.sqrt(d2) < cone) continue;
+        if (d2 < bd) { bd = d2; best = o; }
+      }
+      return best;
+    }
+
     _pickTarget(k) {
+      if (this.isArena) {
+        const fx = Math.sin(k.heading), fz = Math.cos(k.heading);
+        return this._nearestKart(k.pos.x, k.pos.z, k, fx, fz, 0.3) || this._nearestKart(k.pos.x, k.pos.z, k, 0, 0, 0);
+      }
       const ks = this.karts;
       let best = null, bd = 1e9;
       const my = k.raceDist || 0;
@@ -906,7 +1274,12 @@
 
     _useInstant(k, st, id, back) {
       const h = k.heading, fx = Math.sin(h), fz = Math.cos(h);
+      G.events.emit('itemUsed', { kart: k, item: id });
       switch (id) {
+        case 'chomp':
+          this._startChomp(k, st);
+          this._consume(k);
+          break;
         case 'mushroom': case 'mushroom3':
           if (k.boost) k.boost(1.0);
           this._snd('boost', k);
@@ -973,6 +1346,7 @@
     }
 
     _leader(except) {
+      if (this.isArena) return except ? this._nearestKart(except.pos.x, except.pos.z, except, 0, 0, 0) : null;
       const ks = this.karts;
       let best = null;
       for (let i = 0; i < ks.length; i++) {
@@ -1003,6 +1377,12 @@
           st.pend[0] = st.pend[1] = null; st.pressed = false; st.goldT = 0;
         }
         k.draggedItem = null;
+        if (k.heldItems[0] || k.heldItems[1]) {
+          const ids = [];
+          if (k.heldItems[0]) ids.push(k.heldItems[0]);
+          if (k.heldItems[1]) ids.push(k.heldItems[1]);
+          this._scatterDrops(k, ids);
+        }
         k.heldItems[0] = k.heldItems[1] = null;
         k.itemCounts[0] = k.itemCounts[1] = 0;
         k.roulette[0] = k.roulette[1] = 0;
@@ -1068,8 +1448,9 @@
       const len = this.track.length;
       if (T && !T.finished && T.pos) {
         const dx = T.pos.x - e.x, dz = T.pos.z - e.z;
-        if (dx * dx + dz * dz < e.directR * e.directR) { ax = T.pos.x; az = T.pos.z; rate = 14; }
+        if (this.isArena || dx * dx + dz * dz < e.directR * e.directR) { ax = T.pos.x; az = T.pos.z; rate = 14; }
       }
+      if (ax === undefined && this.isArena) { ax = e.x + e.vx; az = e.z + e.vz; }
       if (ax === undefined) {
         const p = this.track.pointAt(wrapLen(e.dist + 18, len));
         let lat = 0;
@@ -1090,6 +1471,11 @@
     _stepProj(e, dt) {
       const kind = e.kind;
       if (e.mode === 'home') {
+        if (this.isArena && kind !== 'spiny' && (!e.target || e.target.finished) && e.age - e.lastPick > 0.4) {
+          e.lastPick = e.age;
+          const sp = Math.sqrt(e.vx * e.vx + e.vz * e.vz) || 1;
+          e.target = this._nearestKart(e.x, e.z, e.owner, e.vx / sp, e.vz / sp, 0.2);
+        }
         if (kind === 'spiny' && e.age - e.lastPick > 0.5) { e.lastPick = e.age; e.target = this._leader(e.owner); }
         this._steerHome(e, dt);
       }

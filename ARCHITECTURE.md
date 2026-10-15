@@ -198,3 +198,181 @@ G.UI.showGPFinal(standings, onDone)   // trophy screen
 ## `js/main.js` (owner: lead) → `G.Game`
 Fixed-step loop, renderer, chase camera, race state machine, countdown, rocket start, lap counting,
 positions, GP points `[10,8,6,4,3,2,1,0]`, wiring of all modules.
+
+---------------------------------------------------------------------------------------------------
+# v2 — DOUBLE DASH PARITY (supersedes v1 where they conflict)
+
+Goal: play exactly like *Mario Kart: Double Dash!!* (GameCube) — same rules, modes, structure, item set,
+drift/mini-turbo technique, HUD layout, menu flow, 16 courses in 4 cups (+ All-Cup Tour), Mirror mode,
+2–4 player split-screen, co-op (two players on one kart), Battle mode with 3 games, Time Trial with
+ghosts, unlockables, award ceremony. **Characters, names, music melodies and art stay ORIGINAL**
+(no Nintendo characters, likenesses, logos, music or ripped assets). Course layouts/themes may closely
+follow the DD courses but use original names. Generic item names are fine (Mushroom, Banana,
+Green Shell, Red Shell, Spiny Shell, Star, Lightning, Fake Item Box, Golden Mushroom, Bomb).
+
+New script load order (index.html):
+```
+lib/three.min.js, js/util.js, js/save.js, js/input.js, js/sound.js, js/characters.js, js/track.js,
+js/tracks/cup_mushroom.js, js/tracks/cup_flower.js, js/tracks/cup_star.js, js/tracks/cup_special.js,
+js/kart.js, js/items.js, js/ai.js, js/ghost.js, js/battle.js, js/ceremony.js, js/ui.js, js/main.js
+```
+
+## Characters & karts (characters.js) — 20 characters, 10 pairs, 21 karts
+| pair | weights | special (DD equivalent) |
+|---|---|---|
+| blaze / ember | medium, medium | `fireball` (Mario/Luigi) |
+| rosa / lily | medium, medium | `heart` (Peach/Daisy) |
+| pip / pop | medium, medium | `egg` (Yoshi/Birdo) |
+| grub / nib | heavy, light | `giant_banana` (DK/Diddy) |
+| krag / krik | heavy, light | `mega_shell` (Bowser/Bowser Jr) |
+| volt / vex | heavy, heavy | `bomb` (Wario/Waluigi) |
+| shelby / swoop | light, light | `shell_triple` (Koopa/Paratroopa: triple green OR triple red) |
+| bitsy / bop | light, light | `chomp` (Baby Mario/Luigi: Chain Chomp) |
+| spud / sprout | light, light | `mushroom_gold` (Toad/Toadette) — **unlockable** |
+| thorn / wisp | heavy, heavy | `all` (Petey/King Boo: any special) — **unlockable** |
+`G.CHARACTERS[i] = { id, name, weight, special, partner, colors, tagline, locked: bool }`.
+`G.KARTS`: 21 karts = 7 light, 7 medium, 7 heavy; 6 of each class are "signature" karts (`owner: charId`,
+two per pair spread over its classes) and one `parade` kart with `weight: 'any'` usable by every pair
+(unlockable). ~1/3 of karts have `locked: true` (unlocked via G.Save). DD rule: the kart class equals the
+HEAVIER rider; a pair may only pick karts of that class (or 'any').
+`G.Characters.buildKart(kartId, frontId, rearId)` unchanged API (+ `parade`). New:
+`G.Characters.buildTrophy(kind: 'gold'|'silver'|'bronze') -> THREE.Group` (used by ceremony / UI).
+
+## Save / unlocks (js/save.js) → `G.Save`
+```
+G.Save.data                       // persisted JSON in localStorage key 'tt-save-v2' (try/catch everywhere)
+G.Save.isUnlocked(key) / unlock(key) / unlockAll()     // keys: 'char:spud', 'kart:parade', 'cup:special',
+                                                       //  'cup:allcup', 'cc:mirror', 'cc:150'
+G.Save.recordGP(cupId, cc, place) -> [newlyUnlockedKeys]   // applies the unlock rules below
+G.Save.bestTime(trackId) / bestLap(trackId) / setRecord(trackId, total, lap, ghostData) -> bool improved
+G.Save.ghost(trackId) -> ghostData | null
+G.Save.settings  { musicVol, sfxVol, itemFreq:'normal', ... }  + G.Save.persist()
+```
+Unlock rules (DD-like, simplified): start with Mushroom/Flower/Star cups at 50/100cc. Gold any cup at 100cc →
+150cc. Gold Mushroom+Flower+Star (any cc) → Special Cup. Gold Special → All-Cup Tour. Gold All-Cup Tour at
+150cc → Mirror. Each GP gold at 100cc+ unlocks the next locked kart; gold Special 150cc → spud/sprout;
+gold All-Cup 150 → thorn/wisp + parade kart. Options menu has "Unlock everything".
+
+## Input (input.js) — multiplayer
+```
+G.Input.players[0..3] = { state: {same fields as v1 state}, device: 'kb1'|'kb2'|'kbfull'|'pad0'..'pad3'|null }
+G.Input.state  // alias of players[0].state (v1 compatible)
+G.Input.configure(count)   // 1P: kbfull (all keys) + pad0; 2P: P1 kb1 (WASD set) or pad0, P2 kb2 (arrows set) or pad1; 3-4P: pads (kb1/kb2 for first two if fewer pads)
+G.Input.poll()             // polls all players
+```
+kb1 (left hand): W/S/A/D, drift LeftShift, item E (throwBack = S held), swap Q, look-back C, pause Esc.
+kb2 (right hand): arrows, drift RightShift or '/', item Enter or '.', swap ',' or RightCtrl, pause Backspace/P.
+
+## Track engine (track.js) — registry + hooks (lead writes core)
+```
+G.defineTrack(def)        // called by js/tracks/cup_*.js
+G.TRACKS  // [{id, name, cup, order, theme, laps, music, preview:{sky, ground, road}}]  (derived from defs)
+G.CUPS    // mushroom, flower, star, special (+ 'allcup' virtual = all 16 in order)
+new G.Track(trackId, scene, { mirror: bool })
+track.laps                // per-course lap count (Baby-Park-like oval = 7, Colosseum-like = 2)
+track.query(x, z, hint, y?)  // y optional: disambiguates stacked roads (overpasses)
+RESULT += { surface: 'road'|'offroad'|'sand'|'grass'|'mud'|'water'|'ice'|'boost'|'jump'|'cannon'|'void',
+            cannonTo (dist), cannonHeight }   // offroad flavours slow differently; 'ice' = road speed, low grip
+track.getHazards() -> [{ x, y, z, radius, hitKind: 'spin'|'flip'|'squish'|'bump', vx, vz }]  // world space, reused
+track.mirror (bool)
+```
+def = { id, name, cup, order (1-4), laps, music, seed, hw, shoulder, scale,
+  theme: { sky:[top,mid,bottom], fog:[color,near,far], ground, shoulder, road:[a,b], curb:[a,b],
+           hemi:[sky,ground,intensity], sun:[color,intensity], emb, bg }  OR a built-in key
+           ('meadow'|'dunes'|'glacier'|'starlight'),
+  offroad: 'offroad'|'sand'|'grass'|'mud'|'water'  (shoulder surface), noWalls, walls: 'fence'|'barrier'|'none',
+  pts: [[x, z, y?, halfWidth?], ...]   (closed loop, first point = start line),
+  pads:[{d,len,l,w}], jumps:[{d,len,l,w}], cannons:[{d,len,l,w,to,height}],
+  zones:[{d,len,l,w,surface}]   // road-area surface overrides (ice sheet, mud patch, water, void pit)
+  itemRows: [{d, count, double?:bool}]  (optional; default auto),
+  decorate(track, kit)   // build scenery with kit (see below). Use kit.at(d, lateral, dy) for positions.
+  hazards(track, kit) -> [hazard]   // moving obstacles; hazard = { x,y,z, radius, hitKind, vx, vz,
+                                    //   update(dt, time), object3D }  (coordinates in track build space)
+}
+kit = { Batch (tri/quad/box(cx,y0,cz,sx,sy,sz,ry,color)/frustum(x,y0,z,r0,r1,h,sides,color,rot)/blob(x,y,z,sx,sy,sz,color,detail)),
+        col(hex)->[r,g,b], mix, mul, hsl(h,s,l), rng() (seeded), theme (resolved theme cfg), length, groundY,
+        N, ds, px/py/pz/hw/curv (Float32Arrays of centerline samples, 1 sample ≈ ds m),
+        at(d, lateral, dy) -> [x,y,z] (build space), frame(d) -> {x,y,z,tx,tz,rx,rz,halfWidth},
+        mesh(batch, matOpts?, basic?) -> merged vertex-colored Mesh (Lambert, or MeshBasic if basic), added + auto-disposed,
+        mat(opts, basic?) -> tracked material, add(object3D) (adds under the track root, auto-removed),
+        trackGeom(g)/trackMat(m) (register for disposal), scatter(count, off0, off1, margin, cb(x,z,i,rng)),
+        farScatter(count, minD, cb(x,z,rng)), clear(x,z,m) -> bool (no road within m), reserve(x,z,r),
+        follow(obj, spin) (camera-locked backdrop), makeCanvasTexture(w,h,draw(ctx,w,h)), time }
+track.setZoneActive(zoneId, bool) toggles zones that have an `id` (e.g. tides). def.update(track, dt, time)
+optional per-frame hook. def.style ∈ meadow|dunes|glacier|starlight reuses that built-in road/wall look
+('starlight' = rainbow road slab, no walls); def.walls 'fence'|'adobe'|'barrier'|'none', def.wallColors
+[hexA, hexB]; def.ground:false (no ground plane), def.startArch:false, def.snow:true (snowfall).
+Mirror mode: the whole built world lives in one root Group scaled x = -1; query/pointAt/start grid/
+itemBoxSpots/minimap/getHazards are converted to mirrored world space by the core — content code never
+needs to care about mirroring.
+
+## Kart (kart.js) — DD feel changes
+- DD power-slide: hop then slide; mini-turbo charges ONLY by counter-steering wiggles (steer from the
+  drift side across to the opposite side and back = 1 flick). Sparks: none → yellowish → BLUE after 2
+  flicks (fast flicks ~0.18 s each). Release while blue → mini-turbo (0.75 s). Only one spark level
+  (driftLevel 0/1; 1 = blue). Holding the drift alone never charges.
+- Surfaces per v2 RESULT. 'cannon' → fly in an arc along the track to `cannonTo` (no control).
+  'ice' = low grip slide. 'water' = splash & slow; deep water is 'void'.
+- Slipstream (drafting): directly behind a kart (<18 m, within ~12°) above 70% speed for 1.2 s →
+  wind streaks then 1.2 s boost.
+- Slap (DD rear-rider attack): `input.slapPressed` (edge) OR itemPressed with BOTH slots empty → rear rider
+  swings; any kart within 3 m to the side gets bumped sideways and, if its slot 0 has an item and ours
+  is empty, the item is stolen. Animation on model.rear.
+- Rescue: falling into 'void' → an original propeller rescue-drone (simple model) lowers the kart back
+  onto the road (1.6 s), like DD's Lakitu.
+- Track hazards: main.js calls `kart.hit(h.hitKind)` or `kart.bump(vx, vz)` (new method: shove +
+  speed loss, no item loss) on contact.
+- `kart.query` calls must pass this.pos.y as the 4th arg.
+- Co-op: `kart.coop = {driver: playerIdx, thrower: playerIdx}`; swap() also swaps these (main reads it).
+- Ghost mode: `new G.Kart({..., ghost: true})` → translucent, no collisions, no audio (used by ghost.js).
+
+## Items (items.js) — DD item set
+Normal pool ONLY: banana, shell_green, shell_red, mushroom, fake_box, star, lightning, spiny.
+Specials (only appear in a slot whose rider owns them; `all` = random special): fireball, heart, egg,
+giant_banana, mega_shell, bomb, shell_triple (→ shell_green3 or shell_red3), chomp, mushroom_gold.
+DD probabilities: specials appear with decent weight for each character (≈20%); star/lightning/spiny
+only for back positions; 1st place mostly bananas/green shells/fake boxes.
+- Item box gives ONE item to the rear slot if empty else the front slot. Double item boxes (track
+  itemRows double:true, rendered as two stacked/side-by-side boxes) fill BOTH slots.
+- When a kart is hit and loses items (event 'kartLostItems' with {kart, items:[ids]}), the items are
+  dropped on the track as pickups other karts can collect (spinning item icons, 15 s life).
+- chomp: a big black ball-and-chain biter drags the kart along the track centerline at ~1.4x top speed
+  for 6 s, steering itself, flipping karts it touches.
+- `G.ItemSystem(scene, track, karts, { mode: 'race'|'balloon'|'shine'|'bomb', boxes: bool })`;
+  'bomb' mode: every box gives bombs; up to 5 bombs carried (itemCounts).
+- Emits `G.events.emit('itemHit', {victim, kind, attacker, item})` (battle mode uses it to pop balloons).
+
+## Battle (js/battle.js) → `G.Arena` + `G.BattleMode` + `G.BattleAI`
+4 original arenas (DD equivalents: Cookie Land, Block City, Pipe Plaza, Tilt-a-Kart-ish/GameCube-ish).
+`G.ARENAS = [{id, name, music}]`. `new G.Arena(id, scene)` implements the Track interface
+(query/pointAt/getStartGrid/itemBoxSpots/minimap/update/dispose/getHazards/length/theme/sun) for an
+enclosed field (see battle prompt for the wall/lateral trick).
+`new G.BattleMode(game, { type: 'balloon'|'shine'|'bomb', arena, entrants })`, methods:
+`step(dt)`, `hudState(kart) -> {balloons, shineTime, score, ...}`, `isOver()`, `results()`.
+Battle games: Balloon Battle (3 balloons, pop by any hit, last kart standing / most balloons after 3 min);
+Shine Thief (grab the shine, hold 55 s total; getting hit drops it); Bomb Blast (item boxes give bombs,
+3 points to win, hits score points).
+
+## Ghosts (js/ghost.js) → `G.Ghost`
+`G.Ghost.Recorder(kart)` .sample() each step (every 2nd step stores x,y,z,heading,driftYaw,steer),
+`.finish() -> data` (compact arrays, ≤ ~200 KB); `new G.Ghost.Player(scene, data, kartInfo)` .update(t)
+spawns a translucent kart (G.Kart ghost:true or buildKart) and interpolates.
+
+## Ceremony (js/ceremony.js) → `G.Ceremony`
+`G.Ceremony.play({ scene, camera, standings (top 3 with front, rear, kart), playerPlace }, onDone)`
+builds its own temporary 3D podium stage (night sky, spotlights, confetti, fireworks), places the top-3
+karts + riders on a podium, trophy model presented to 1st, camera choreography ~12 s, skippable with
+Enter/click. `G.Ceremony.update(dt)` called by main each frame; `G.Ceremony.active`.
+
+## UI (ui.js) — DD flow, DD HUD layout
+Title → Main menu: GRAND PRIX · TIME TRIAL · VERSUS · BATTLE · RECORDS · OPTIONS.
+GP: player count 1-2 (co-op toggle when 2: "Same kart (co-op)" / "Separate karts") → cc (50/100/150/
+Mirror, locked ones shown locked) → character pairs per player → kart per player (3D turntable preview
+via a small secondary renderer) → cup (Mushroom/Flower/Star/Special/All-Cup Tour; locked shown locked).
+Versus: 2-4 players (co-op pairs allowed), item frequency, course select (all 16, by cup).
+Battle: 2-4 players (+ optional CPU fill), game type, arena. TT: course + ghost toggle.
+`G.HUD` stays the 1-player singleton AND `G.HUD.create(index, count) -> hudInstance` for split-screen
+(same methods: update/countdown/banner/setMinimap/show/hide; instance occupies its viewport quadrant:
+2P = top/bottom halves, 3-4P = quadrants). DD HUD layout: item slots TOP-LEFT (big rear-rider slot,
+smaller front-rider slot, character face icons next to them), lap + time TOP-RIGHT, position BOTTOM-RIGHT
+(big), minimap RIGHT side (vertical), lap counter as "LAP 1/3". Battle HUD: balloons/shine timer/score.

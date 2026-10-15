@@ -9,7 +9,12 @@
   const POOL = 40;
   const HOP_TIME = 0.25, HOP_H = 0.35;
   const SPIN_TIME = 1.1, FLIP_TIME = 1.5, SQUISH_TIME = 1.5;
-  const L1_CHARGE = 1.0, L2_CHARGE = 2.2;
+  const MT_TIME = 0.75;           // mini-turbo length (s)
+  const FLICKS_BLUE = 2;          // wiggles needed for blue sparks
+  const FALL_TIME = 0.4, CARRY_TIME = 1.2, DRONE_HANG = 3.4;
+  const SLAP_CD = 0.8, SLAP_ANIM = 0.4;
+  const DRAFT_NEED = 1.2, DRAFT_RANGE = 18, DRAFT_COS = Math.cos(12 * Math.PI / 180);
+  const SURF_MUL = { offroad: 0.55, grass: 0.55, sand: 0.6, mud: 0.5, water: 0.65 };
   const GRAVITY = 32;
 
   // ---- shared render resources (lazy) ----
@@ -29,6 +34,52 @@
       pointsMat: new THREE.PointsMaterial({ size: 0.45, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true }),
     };
     return shared;
+  }
+
+  // ---- rescue drone resources (lazy, shared geometry) ----
+  let droneShared = null;
+  function getDroneShared() {
+    if (droneShared) return droneShared;
+    const body = new THREE.SphereGeometry(0.5, 10, 8); body.scale(1, 0.72, 1);
+    const eye = new THREE.SphereGeometry(0.17, 8, 6);
+    const mast = new THREE.CylinderGeometry(0.05, 0.05, 0.3, 5);
+    const blade = new THREE.BoxGeometry(1.9, 0.04, 0.2);
+    const line = new THREE.CylinderGeometry(0.025, 0.025, 1, 4);
+    const prong = new THREE.BoxGeometry(0.08, 0.5, 0.08);
+    const hub = new THREE.SphereGeometry(0.14, 6, 5);
+    droneShared = {
+      body, eye, mast, blade, line, prong, hub,
+      mBody: new THREE.MeshLambertMaterial({ color: 0xf2f2ee, flatShading: true }),
+      mAccent: new THREE.MeshLambertMaterial({ color: 0xe8a020, flatShading: true }),
+      mDark: new THREE.MeshLambertMaterial({ color: 0x222833, flatShading: true }),
+      mLine: new THREE.MeshBasicMaterial({ color: 0xdddddd }),
+    };
+    return droneShared;
+  }
+  function buildDrone() {
+    const d = getDroneShared();
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(d.body, d.mBody));
+    const eye = new THREE.Mesh(d.eye, d.mDark); eye.position.set(0, 0.05, 0.4); g.add(eye);
+    const band = new THREE.Mesh(d.hub, d.mAccent); band.position.set(0, 0.3, 0); band.scale.set(1.6, 0.5, 1.6); g.add(band);
+    const mast = new THREE.Mesh(d.mast, d.mDark); mast.position.y = 0.45; g.add(mast);
+    const rotor = new THREE.Group(); rotor.position.y = 0.62;
+    const b1 = new THREE.Mesh(d.blade, d.mAccent), b2 = new THREE.Mesh(d.blade, d.mAccent);
+    b2.rotation.y = Math.PI / 2;
+    rotor.add(b1, b2); g.add(rotor);
+    const line = new THREE.Mesh(d.line, d.mLine); g.add(line);
+    const claw = new THREE.Group();
+    for (let i = 0; i < 3; i++) {
+      const a = i / 3 * Math.PI * 2;
+      const pr = new THREE.Mesh(d.prong, d.mDark);
+      pr.position.set(Math.cos(a) * 0.18, -0.2, Math.sin(a) * 0.18);
+      pr.rotation.z = Math.cos(a) * 0.4; pr.rotation.x = -Math.sin(a) * 0.4;
+      claw.add(pr);
+    }
+    g.add(claw);
+    g.frustumCulled = false;
+    g.userData = { rotor, line, claw };
+    return g;
   }
 
   // ---- fallback kart if characters.js unavailable ----
@@ -78,6 +129,8 @@
       this.front = opts.frontId;
       this.rear = opts.rearId;
       this.isPlayer = !!opts.isPlayer;
+      this.ghost = !!opts.ghost;
+      this.coop = null;
       this.index = opts.index || 0;
       this.cc = opts.cc || 100;
 
@@ -135,6 +188,19 @@
       this.spinTimer = 0;
       this.invulnTimer = 0;
       this.falling = false;
+      this.rescued = false;
+      this.cannonFlight = false;
+      this.drafting01 = 0;
+      this._draft = 0; this._draftCd = 0; this._draftSeen = -1;
+      this._slapCd = 0; this._slapAnim = 0; this._slapSide = 1;
+      this._wobble = 0; this._wobbleDir = 1;
+      this._flickN = 0; this._flickMin = 0; this._flickSt = 0;
+      this._cn = null; this._cnT = 0; this._cnDur = 1; this._cnD0 = 0; this._cnD1 = 0; this._cnY0 = 0; this._cnH = 16;
+      this._rescueT = 0; this._rp = null;
+      this._capX = 0; this._capY = 0; this._capZ = 0; this._capH = 0;
+      this._drone = null;
+      this._lastSurf = 'road';
+      this._gx = 0; this._gz = 0; this._gInit = false;
       this.speedMul = 1;
       this.lostItems = false;
       this.hitKind = null;
@@ -202,6 +268,19 @@
         }
       });
 
+      if (this.ghost) {
+        model.group.traverse((o) => {
+          if (o.isMesh && o.material) {
+            const ms = Array.isArray(o.material) ? o.material : [o.material];
+            for (let i = 0; i < ms.length; i++) {
+              if (!ms[i]._ghostCloned) { ms[i] = ms[i].clone(); ms[i]._ghostCloned = true; }
+              ms[i].transparent = true; ms[i].opacity = 0.4; ms[i].depthWrite = false;
+            }
+            o.material = Array.isArray(o.material) ? ms : ms[0];
+          }
+        });
+      }
+
       const sh = getShared();
       // flames
       this._flames = [];
@@ -212,7 +291,7 @@
         model.group.add(a, b);
         exs = [a, b];
       }
-      for (const ex of exs) {
+      if (!this.ghost) for (const ex of exs) {
         const f = new THREE.Mesh(sh.flameGeo, sh.flameMat);
         f.visible = false;
         f.frustumCulled = false;
@@ -239,7 +318,10 @@
       this._pCursor = 0;
       this._pAlive = 0;
 
-      if (this.scene) { this.scene.add(this.mesh); this.scene.add(this._shadow); this.scene.add(this._points); }
+      if (this.scene) {
+        this.scene.add(this.mesh);
+        if (!this.ghost) { this.scene.add(this._shadow); this.scene.add(this._points); }
+      }
       this._syncMesh(0);
     }
 
@@ -249,32 +331,36 @@
     }
 
     isInvincible() {
-      return this.starTimer > 0 || this.invulnTimer > 0;
+      return this.starTimer > 0 || this.invulnTimer > 0 || this.cannonFlight;
     }
 
     _snd(name) {
-      if (this.isPlayer && G.Sound && G.Sound.play) G.Sound.play(name);
+      if (this.isPlayer && !this.ghost && G.Sound && G.Sound.play) G.Sound.play(name);
     }
 
     _loseItems() {
-      const had = this.heldItems[0] || this.heldItems[1] || this.roulette[0] > 0 || this.roulette[1] > 0;
+      const lost = [];
+      for (let s = 0; s < 2; s++) {
+        const id = this.heldItems[s];
+        if (id) { const n = Math.max(1, this.itemCounts[s] | 0); for (let k = 0; k < n; k++) lost.push(id); }
+      }
       this.heldItems[0] = null; this.heldItems[1] = null;
       this.itemCounts[0] = 0; this.itemCounts[1] = 0;
       this.roulette[0] = 0; this.roulette[1] = 0;
       this.lostItems = true;
-      if (had || true) G.events && G.events.emit('kartLostItems', this);
+      if (lost.length && G.events) G.events.emit('kartLostItems', { kart: this, items: lost });
     }
 
     _endDrift(release) {
       if (this.drifting && release) {
-        if (this.driftLevel === 2) { this._boost(1.1, 1, false); this._snd('mini_turbo2'); }
-        else if (this.driftLevel === 1) { this._boost(0.6, 1, false); this._snd('mini_turbo1'); }
+        if (this.driftLevel >= 1) { this._boost(MT_TIME, 1, false); this._snd('mini_turbo1'); }
       }
       this.drifting = false;
       this.driftDir = 0;
       this.driftLevel = 0;
       this.driftCharge = 0;
       this._flick = 0;
+      this._flickN = 0; this._flickSt = 0; this._flickMin = 0;
     }
 
     _boost(seconds, power, sound) {
@@ -298,7 +384,7 @@
     }
 
     hit(kind) {
-      if (this.falling || this.isInvincible()) return;
+      if (this.falling || this.ghost || this.isInvincible()) return;
       if (this.onBeforeHit && this.onBeforeHit(kind) === true) return;
       if (this.spinTimer > 0 || this.squishTimer > 0) return;
       this._endDrift(false);
@@ -322,6 +408,16 @@
       }
     }
 
+    // shove (no item loss); star / invulnerable karts are not bumped
+    bump(vx, vz) {
+      if (this.falling || this.ghost || this.isInvincible()) return;
+      this.vel.x += vx; this.vel.z += vz;
+      this.speed *= 0.8;
+      this._wobble = 0.45;
+      this._wobbleDir = (vx * Math.cos(this.heading) - vz * Math.sin(this.heading)) > 0 ? -1 : 1;
+      this._endDrift(false);
+    }
+
     respawn() {
       const L = this.track ? this.track.length : 1;
       let d = this.lastGoodDist - 5;
@@ -340,6 +436,8 @@
       this._hopTimer = 0; this._hopPending = false;
       this.stallTimer = 1.0;
       this.invulnTimer = 2.0;
+      this.rescued = false; this.cannonFlight = false;
+      if (this._drone) this._drone.visible = false;
       this.trackIndex = -1;
       this._prevGround = rp.y;
       this.y = rp.y;
@@ -352,6 +450,7 @@
       t = this.heldItems[0]; this.heldItems[0] = this.heldItems[1]; this.heldItems[1] = t;
       t = this.itemCounts[0]; this.itemCounts[0] = this.itemCounts[1]; this.itemCounts[1] = t;
       t = this.roulette[0]; this.roulette[0] = this.roulette[1]; this.roulette[1] = t;
+      if (this.coop) { t = this.coop.driver; this.coop.driver = this.coop.thrower; this.coop.thrower = t; }
       this._snd('swap');
       const m = this.model;
       if (!m.frontSeat || !m.rearSeat || !m.front || !m.rear) return;
@@ -401,6 +500,185 @@
       m.front = this._swB;
       m.rear = this._swA;
       this._swA = null; this._swB = null;
+    }
+
+    // ------------------------------------------------------------ slap
+    _slap() {
+      this._slapCd = SLAP_CD;
+      this._slapAnim = SLAP_ANIM;
+      const karts = Kart._karts;
+      const s = Math.sin(this.heading), c = Math.cos(this.heading);
+      const rx = -c, rz = s;
+      let side = this._slapSide, bestD = 1e9, victim = null, vlat = 0;
+      if (karts) {
+        for (let i = 0; i < karts.length; i++) {
+          const k = karts[i];
+          if (!k || k === this || k.ghost || k.falling || k.cannonFlight) continue;
+          const dx = k.pos.x - this.pos.x, dz = k.pos.z - this.pos.z;
+          const d2 = dx * dx + dz * dz;
+          if (d2 > 9) continue;
+          const along = dx * s + dz * c;
+          if (Math.abs(along) > 2.4) continue;
+          if (d2 < bestD) { bestD = d2; victim = k; vlat = dx * rx + dz * rz; }
+        }
+      }
+      if (victim) side = vlat >= 0 ? 1 : -1;
+      else side = (this.input.steer || 0) < -0.2 ? -1 : 1;
+      this._slapSide = side;
+      this._snd('slap');
+      if (!victim || victim.isInvincible()) return;
+      victim.bump(rx * side * 9, rz * side * 9);
+      if (victim.isPlayer && !this.isPlayer) victim._snd('slap');
+      if (victim.heldItems[0] && !this.heldItems[0] && !victim.draggedItem) {
+        this.heldItems[0] = victim.heldItems[0]; this.itemCounts[0] = victim.itemCounts[0];
+        victim.heldItems[0] = null; victim.itemCounts[0] = 0; victim.roulette[0] = 0;
+        this.stolen = true;
+        if (G.events) G.events.emit('kartSlapSteal', { thief: this, victim: victim, item: this.heldItems[0] });
+      }
+    }
+
+    // ------------------------------------------------------------ cannon flight
+    _startCannon(to, height) {
+      const track = this.track, L = track.length, ti = this.trackInfo;
+      if (this.cannonFlight || this.falling) return false;
+      let d1 = ((to % L) + L) % L;
+      const d0 = ti.dist;
+      if (d1 <= d0) d1 += L;
+      const len = d1 - d0;
+      this._cnD0 = d0; this._cnD1 = d1; this._cnY0 = this.pos.y;
+      this._cnH = height !== undefined ? height : Math.min(30, 8 + len * 0.12);
+      this._cnDur = clamp(len / 48, 1.1, 4.5);
+      this._cnT = 0;
+      this.cannonFlight = true;
+      this.airborne = false;
+      this._endDrift(false);
+      this._snd('cannon');
+      return true;
+    }
+
+    _updateCannon(dt) {
+      const track = this.track, L = track.length, ti = this.trackInfo;
+      this._cnT += dt;
+      const u = clamp(this._cnT / this._cnDur, 0, 1);
+      let d = this._cnD0 + (this._cnD1 - this._cnD0) * u;
+      d = ((d % L) + L) % L;
+      const p = track.pointAt(d);
+      const arc = 4 * this._cnH * u * (1 - u);
+      const prevY = this.pos.y;
+      this.pos.x = p.x; this.pos.z = p.z;
+      this.pos.y = this._cnY0 + (p.y - this._cnY0) * u + arc;
+      this.vy = (this.pos.y - prevY) / dt;
+      this.heading = Math.atan2(p.tx, p.tz);
+      const cruise = (this._cnD1 - this._cnD0) / this._cnDur;
+      this.speed = Math.min(cruise, this.stats.topSpeed * 1.2);
+      this.vel.set(p.tx * this.speed, 0, p.tz * this.speed);
+      ti.dist = d; ti.lateral = 0; ti.onRoad = true; ti.surface = 'road'; ti.y = p.y;
+      ti.tx = p.tx; ti.tz = p.tz; ti.rx = p.rx; ti.rz = p.rz; ti.halfWidth = p.halfWidth; ti.wallDist = p.halfWidth;
+      this._updateProgress(dt);
+      if (u >= 1) {
+        this.cannonFlight = false;
+        this.airborne = false;
+        this.pos.y = p.y; this.vy = 0; this.airTime = 0;
+        this.speed = this.stats.topSpeed * 0.9;
+        this.vel.set(p.tx * this.speed, 0, p.tz * this.speed);
+        this.trackIndex = -1;
+        this.lastGoodDist = d; this.lastGoodY = p.y; this._prevGround = p.y;
+        this.invulnTimer = Math.max(this.invulnTimer, 0.5);
+        this._lastSurf = 'road';
+      }
+      this._visuals(dt, 0);
+    }
+
+    // ------------------------------------------------------------ rescue drone
+    _startRescue() {
+      const track = this.track;
+      if (!track || !track.respawnPoint) return false;
+      const L = track.length;
+      let d = this.lastGoodDist - 5;
+      d = ((d % L) + L) % L;
+      this._rp = track.respawnPoint(d);
+      this._capX = this.pos.x; this._capY = this.pos.y; this._capZ = this.pos.z; this._capH = this.heading;
+      this.rescued = true;
+      this._rescueT = 0;
+      this.speed = 0; this.vel.set(0, 0, 0); this.vy = 0;
+      if (!this._drone) {
+        this._drone = buildDrone();
+        if (this.scene) this.scene.add(this._drone);
+      }
+      this._drone.visible = true;
+      this._snd('hop');
+      return true;
+    }
+
+    _updateRescue(dt) {
+      const rp = this._rp;
+      this._rescueT += dt;
+      const t = this._rescueT;
+      const dr = this._drone, ud = dr.userData;
+      const e = (x) => x * x * (3 - 2 * x);
+      this._fallTimer = FALL_TIME + t;
+      if (t < CARRY_TIME) {
+        const p = clamp(t / CARRY_TIME, 0, 1);
+        const ep = e(p);
+        this.pos.x = this._capX + (rp.x - this._capX) * ep;
+        this.pos.z = this._capZ + (rp.z - this._capZ) * ep;
+        const hangY = rp.y + 2.6;
+        const yUp = this._capY + (hangY - this._capY) * e(clamp(p / 0.7, 0, 1));
+        this.pos.y = p < 0.7 ? yUp : hangY + (rp.y - hangY) * e((p - 0.7) / 0.3);
+        let dh = rp.heading - this._capH;
+        while (dh > Math.PI) dh -= TAU; while (dh < -Math.PI) dh += TAU;
+        this.heading = this._capH + dh * ep;
+        // drone sits above the kart; swoops in over the first 0.25 s
+        const sw = clamp(1 - t / 0.25, 0, 1);
+        dr.position.set(this.pos.x + sw * 7, this.pos.y + DRONE_HANG + sw * 3, this.pos.z + sw * 4);
+      }
+      ud.rotor.rotation.y += dt * 40;
+      const len = Math.max(0.3, DRONE_HANG - 0.9);
+      ud.line.scale.y = len; ud.line.position.y = -0.4 - len / 2;
+      ud.claw.position.y = -0.4 - len;
+      dr.rotation.y = this.heading;
+      dr.rotation.z = Math.sin(t * 6) * 0.05;
+      this.trackInfo.y = this.pos.y;
+      this._visuals(dt, 0);
+      if (t >= CARRY_TIME) {
+        this.rescued = false; this.falling = false;
+        this._drone.visible = false;
+        this.pos.set(rp.x, rp.y, rp.z);
+        this.heading = rp.heading;
+        this.speed = 0; this.vel.set(0, 0, 0); this.vy = 0;
+        this.airborne = false; this.airTime = 0;
+        this._fallTimer = 0;
+        this.spinTimer = 0; this.squishTimer = 0; this.boostTimer = 0; this.burnoutTimer = 0;
+        this._endDrift(false);
+        this._hopTimer = 0; this._hopPending = false;
+        this.invulnTimer = 1.0;
+        this.stallTimer = 0.2;
+        this.trackIndex = -1;
+        this._prevGround = rp.y; this.lastGoodY = rp.y;
+        this._lastSurf = 'road';
+        this.y = rp.y;
+      }
+    }
+
+    // ------------------------------------------------------------ ghost drive (no physics)
+    setGhostPose(x, y, z, heading, yawOffset, steer) {
+      const m = this.model;
+      if (!this._gInit) { this._gx = x; this._gz = z; this._gInit = true; }
+      const dx = x - this._gx, dz = z - this._gz;
+      this._gx = x; this._gz = z;
+      this._wheelSpin += Math.sqrt(dx * dx + dz * dz) / 0.35;
+      this.pos.set(x, y, z);
+      this.heading = heading;
+      this.y = y;
+      this.mesh.position.set(x, y, z);
+      this.mesh.rotation.set(0, heading, 0);
+      m.group.rotation.y = yawOffset || 0;
+      const wh = m.wheels;
+      for (let i = 0; i < wh.length; i++) wh[i].rotation.x = this._wheelSpin;
+      const pv = m.frontWheelPivots;
+      for (let i = 0; i < pv.length; i++) pv[i].rotation.y = -(steer || 0) * 0.45;
+      if (m.front) m.front.rotation.z = (steer || 0) * 0.18;
+      if (m.rear) m.rear.rotation.z = (steer || 0) * 0.14;
     }
 
     // ------------------------------------------------------------ particles
@@ -457,7 +735,12 @@
       const inp = this.input;
       const st = this.stats;
       const track = this.track;
+      if (this.ghost) return;
       this._frame++;
+      if (this._slapCd > 0) this._slapCd -= dt;
+      if (this._slapAnim > 0) this._slapAnim -= dt;
+      if (this._draftCd > 0) this._draftCd -= dt;
+      if (this._wobble > 0) this._wobble -= dt;
 
       // timers
       if (this.boostTimer > 0) this.boostTimer -= dt;
@@ -476,7 +759,12 @@
       if (this.spinTimer > 0) { this.spinTimer -= dt; if (this.spinTimer <= 0) this.hitKind = null; }
       if (this._swapAnim > 0) this._swapStep(dt);
 
+      if (this.rescued) { this._updateRescue(dt); return; }
+      if (this.cannonFlight) { this._updateCannon(dt); return; }
+
       if (inp.swapPressed && !this.falling && this.spinTimer <= 0) this.swap();
+      if (!this.falling && this.spinTimer <= 0 && this.squishTimer <= 0 && this._slapCd <= 0 &&
+          (inp.slapPressed || (inp.itemPressed && !this.heldItems[0] && !this.heldItems[1] && this.roulette[0] <= 0 && this.roulette[1] <= 0))) this._slap();
 
       const stunned = this.spinTimer > 0 || this.falling || this.stallTimer > 0;
       const topBase = st.topSpeed;
@@ -490,21 +778,25 @@
         this.vel.multiplyScalar(0.97);
         this.pos.x += this.vel.x * dt; this.pos.z += this.vel.z * dt;
         this.speed *= 0.97;
-        if (this._fallTimer >= 1.2) this.respawn();
+        if (this._fallTimer >= FALL_TIME) { if (!this._startRescue()) { if (this._fallTimer >= 1.2) this.respawn(); } else { this._updateRescue(0); return; } }
         this._visuals(dt, 0);
         return;
       }
 
       // ---- surface / top speed
       const ti = this.trackInfo;
-      const offroad = !ti.onRoad && ti.surface !== 'boost' && ti.surface !== 'jump';
+      const surfNow = ti.surface;
+      let smul = SURF_MUL[surfNow] || 1;
+      if (smul === 1 && !ti.onRoad && surfNow !== 'boost' && surfNow !== 'jump' && surfNow !== 'ice' && surfNow !== 'cannon' && surfNow !== 'void') smul = 0.55;
+      const offroad = smul < 1;
+      const onIce = surfNow === 'ice';
       const boosting = this.boostTimer > 0;
       let top = topBase * this.speedMul;
       if (boosting) top *= 1 + 0.35 * this.boostPower;
       if (this.starTimer > 0) top *= 1.15;
       if (this.shrinkTimer > 0) top *= 0.7;
       if (this.squishTimer > 0) top *= 0.6;
-      if (offroad && !boosting && this.starTimer <= 0 && grounded) top *= 0.55;
+      if (offroad && !boosting && this.starTimer <= 0 && grounded) top *= smul;
 
       // ---- speed
       if (stunned) {
@@ -553,6 +845,7 @@
             this.drifting = true;
             this.driftDir = steer > 0 ? 1 : -1;
             this.driftCharge = 0; this.driftLevel = 0; this._flick = 0;
+            this._flickN = 0; this._flickSt = 0; this._flickMin = 0;
             this._hopPending = false;
             this._snd('drift_start');
           } else if (this._hopTimer <= 0) this._hopPending = false;
@@ -564,11 +857,17 @@
         } else if (spd01 < 0.25 || stunned) {
           this._endDrift(false);
         } else {
+          // wiggle-only charge. Forgiving for keyboards (input.js ramps/snaps steer ~8-12 /s):
+          // a flick = rel dips below -0.15 then comes back above 0.35 (or returns to centre after a deep dip).
           const rel = steer * this.driftDir;
-          this.driftCharge += dt * 0.8;
-          if (this._flick === 0 && rel < -0.5) this._flick = 1;
-          else if (this._flick === 1 && rel > 0.2) { this._flick = 0; this.driftCharge += 0.5; }
-          this.driftLevel = this.driftCharge >= L2_CHARGE ? 2 : this.driftCharge >= L1_CHARGE ? 1 : 0;
+          if (this._flickSt === 0) {
+            if (rel < -0.15) { this._flickSt = 1; this._flickMin = rel; }
+          } else {
+            if (rel < this._flickMin) this._flickMin = rel;
+            if (rel > 0.35 || (rel > -0.02 && this._flickMin < -0.45)) { this._flickSt = 0; this._flickN++; }
+          }
+          this.driftCharge = this._flickN;
+          this.driftLevel = this._flickN >= FLICKS_BLUE ? 1 : 0;
         }
       }
 
@@ -578,7 +877,8 @@
         let c = Math.pow(Math.min(f / 0.5, 1), 0.7);
         if (f > 0.6) c *= 1 - 0.2 * Math.min(1, (f - 0.6) / 0.4);
         if (this.airborne) c *= 0.5;
-        const rate = 1.9 * st.handling * c;
+        let rate = 1.9 * st.handling * c;
+        if (onIce) rate *= 0.85;
         const sgn = this.speed < 0 ? -1 : 1;
         if (this.drifting) {
           const turn = this.driftDir * (0.75 + 0.5 * steer * this.driftDir);
@@ -590,12 +890,13 @@
 
       // ---- velocity (slip)
       const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
-      const grip = this.airborne ? 1.5 : this.drifting ? 3.2 : 9;
+      const grip = this.airborne ? 1.5 : onIce ? (this.drifting ? 0.9 : 1.1) : this.drifting ? 2.8 : 7;
       const kg = 1 - Math.exp(-grip * dt);
       this.vel.x += (fx * this.speed - this.vel.x) * kg;
       this.vel.z += (fz * this.speed - this.vel.z) * kg;
       this.pos.x += this.vel.x * dt;
       this.pos.z += this.vel.z * dt;
+      if (this._wobble > 0) this.heading += this._wobbleDir * Math.sin(this._wobble * 40) * 0.6 * dt;
 
       // ---- vertical
       if (this.airborne) {
@@ -617,36 +918,37 @@
 
     _queryTrack(dt) {
       const ti = this.trackInfo;
-      const r = this.track.query(this.pos.x, this.pos.z, this.trackIndex);
+      const r = this.track.query(this.pos.x, this.pos.z, this.trackIndex, this.pos.y);
       ti.index = r.index; ti.dist = r.dist; ti.lateral = r.lateral; ti.halfWidth = r.halfWidth;
       ti.wallDist = r.wallDist; ti.y = r.y; ti.onRoad = r.onRoad; ti.surface = r.surface;
       ti.tx = r.tx; ti.tz = r.tz; ti.rx = r.rx; ti.rz = r.rz;
       this.trackIndex = r.index;
+      const surf = ti.surface;
 
-      // walls
+      // walls (void edge takes precedence on wall-less tracks)
       const lat = ti.lateral;
       const wd = ti.wallDist;
-      if (Math.abs(lat) > wd) {
+      if (Math.abs(lat) > wd && surf !== 'void') {
         const sgn = lat > 0 ? 1 : -1;
         const excess = Math.abs(lat) - wd + 0.05;
         this.pos.x -= ti.rx * sgn * excess;
         this.pos.z -= ti.rz * sgn * excess;
         const vl = this.vel.x * ti.rx + this.vel.z * ti.rz;
         if (vl * sgn > 0) {
-          this.vel.x -= ti.rx * vl * 1.3;
-          this.vel.z -= ti.rz * vl * 1.3;
+          this.vel.x -= ti.rx * vl * 1.55; // bounce off (restitution ~0.55)
+          this.vel.z -= ti.rz * vl * 1.55;
         }
         if (this._wallCd <= 0) {
           this._wallCd = 0.25;
-          this.speed *= 0.6;
-          this.vel.x *= 0.6; this.vel.z *= 0.6;
+          this.speed *= 0.68;
+          this.vel.x *= 0.8; this.vel.z *= 0.8;
           // nudge heading toward track tangent
           const th = Math.atan2(ti.tx, ti.tz);
           let dh = th - this.heading;
           while (dh > Math.PI) dh -= TAU;
           while (dh < -Math.PI) dh += TAU;
           if (this.speed < 0) dh = 0;
-          this.heading += dh * 0.25;
+          this.heading += dh * 0.35;
           if (this._wallSnd <= 0) { this._wallSnd = 0.4; this._snd('wall'); }
           this._endDrift(false);
         } else {
@@ -656,13 +958,15 @@
 
       // vertical + surface
       const gy = ti.y;
-      const surf = ti.surface;
+      if (r.cannonTo !== undefined && surf === 'cannon' && !this.airborne && this._startCannon(r.cannonTo, r.cannonHeight)) return;
       if (surf === 'void' && !this.airborne) {
         this.falling = true; this._fallTimer = 0; this.vy = 0;
         this._endDrift(false);
         this._snd('fall');
         return;
       }
+      if (surf === 'water' && this._lastSurf !== 'water' && !this.airborne) this._snd('splash');
+      this._lastSurf = surf;
       if (this.airborne) {
         if (surf === 'void') {
           if (this.pos.y < this.lastGoodY - 5) {
@@ -789,6 +1093,12 @@
       if (this.falling) {
         fallY = -0.5 * this._fallTimer * this._fallTimer * 6;
         flipAng = this._fallTimer * 1.5;
+        if (this.rescued) flipAng = Math.min(FALL_TIME * 1.5, flipAng) * clamp(1 - (this._fallTimer - FALL_TIME) / 0.3, 0, 1);
+      }
+      if (this.cannonFlight) {
+        const u = clamp(this._cnT / this._cnDur, 0, 1);
+        spinAng = u * TAU * 2;
+        flipAng = -Math.sin(u * Math.PI) * 0.4;
       }
 
       // mesh transform
@@ -799,7 +1109,7 @@
       mesh.position.copy(this.pos);
       mesh.rotation.y = this.heading;
       mesh.rotation.x = this._pitch;
-      mesh.rotation.z = this._roll;
+      mesh.rotation.z = this._roll + (this._wobble > 0 ? this._wobbleDir * Math.sin(this._wobble * 36) * 0.12 * Math.min(1, this._wobble * 4) : 0);
       const g = m.group;
       g.position.y = hopY + flipY + (this.falling ? 0 : 0);
       g.rotation.y = -ddir * 0.44 * this._driftVis + spinAng;
@@ -840,7 +1150,18 @@
 
       // riders lean
       if (m.front && this._swapAnim <= 0) { m.front.rotation.z = this._leanF; }
-      if (m.rear && this._swapAnim <= 0) { m.rear.rotation.z = this._leanR * 0.8; }
+      if (m.rear && this._swapAnim <= 0) {
+        if (this._slapAnim > 0) {
+          const p = 1 - this._slapAnim / SLAP_ANIM;
+          const sw = Math.sin(Math.min(1, p * 1.25) * Math.PI);
+          m.rear.rotation.z = this._slapSide * 1.15 * sw;
+          m.rear.rotation.y = this._slapSide * 0.9 * sw;
+          m.rear.rotation.x = -0.25 * sw;
+        } else {
+          m.rear.rotation.z = this._leanR * 0.8;
+          m.rear.rotation.y = 0; m.rear.rotation.x = 0;
+        }
+      }
 
       // flames
       const fl = this.boostTimer > 0;
@@ -860,14 +1181,15 @@
       const ss = this._scale * (1 - clamp(h * 0.08, 0, 0.5));
       sh.scale.set(ss * 0.95, 1, ss * 1.25);
       sh.visible = !this.falling || this._fallTimer < 0.4;
+      if (this.cannonFlight) sh.visible = true;
 
       // particle emission
       const fr = this._frame;
-      if (this.drifting && this.driftLevel > 0 && !this.airborne && (fr & 1) === 0) {
+      if (this.drifting && this._flickN > 0 && !this.airborne && (fr & 1) === 0) {
         this._emitSide ^= 1;
         const side = this._emitSide ? 0.75 : -0.75;
-        const lvl2 = this.driftLevel === 2;
-        const r = lvl2 ? 1 : 0.3, gg = lvl2 ? (fr & 2 ? 0.55 : 0.2) : 0.6, b = lvl2 ? 0.1 : 1;
+        const yel = this.driftLevel < 1; // yellowish after first flick, blue when charged
+        const r = yel ? 1 : 0.3, gg = yel ? 0.85 : 0.6, b = yel ? 0.25 : 1;
         this._emit(this._wx(1.0, side), this.pos.y + 0.2, this._wz(1.0, side),
           (Math.random() - 0.5) * 2.5, 1.5 + Math.random() * 2, (Math.random() - 0.5) * 2.5, r, gg, b, 0.35, 12);
       }
@@ -875,9 +1197,13 @@
         const side = (fr & 4) ? 0.7 : -0.7;
         this._emit(this._wx(1.0, side), this.pos.y + 0.2, this._wz(1.0, side), (Math.random() - 0.5), 0.8, (Math.random() - 0.5), 0.5, 0.5, 0.5, 0.6, -1);
       }
-      if (!this.airborne && !this.falling && !this.trackInfo.onRoad && this.trackInfo.surface === 'offroad' && spd01 > 0.2 && (fr % 4) === 0) {
+      const sf = this.trackInfo.surface;
+      if (!this.airborne && !this.falling && !this.cannonFlight && spd01 > 0.2 && (fr % 3) === 0 && (SURF_MUL[sf] || (!this.trackInfo.onRoad && sf === 'offroad'))) {
         const side = (fr & 8) ? 0.75 : -0.75;
-        this._emit(this._wx(1.0, side), this.pos.y + 0.15, this._wz(1.0, side), (Math.random() - 0.5), 1.0, (Math.random() - 0.5), 0.45, 0.35, 0.2, 0.5, 2);
+        if (sf === 'water') this._emit(this._wx(0.8, side), this.pos.y + 0.2, this._wz(0.8, side), (Math.random() - 0.5) * 3, 2.5 + Math.random() * 2, (Math.random() - 0.5) * 3, 0.55, 0.75, 1, 0.5, 11);
+        else if (sf === 'mud') this._emit(this._wx(0.8, side), this.pos.y + 0.2, this._wz(0.8, side), (Math.random() - 0.5) * 3, 2 + Math.random() * 2, (Math.random() - 0.5) * 3, 0.4, 0.25, 0.1, 0.55, 12);
+        else if (sf === 'sand') this._emit(this._wx(1.0, side), this.pos.y + 0.15, this._wz(1.0, side), (Math.random() - 0.5), 1.0, (Math.random() - 0.5), 0.8, 0.7, 0.4, 0.5, 2);
+        else this._emit(this._wx(1.0, side), this.pos.y + 0.15, this._wz(1.0, side), (Math.random() - 0.5), 1.0, (Math.random() - 0.5), 0.45, 0.35, 0.2, 0.5, 2);
       }
       if (this.boostTimer <= 0 && spd01 > 0.3 && (fr % 8) === 0 && !this.falling) {
         const side = (fr & 8) ? 0.4 : -0.4;
@@ -887,19 +1213,60 @@
     }
 
     dispose() {
-      if (this.scene) { this.scene.remove(this.mesh); this.scene.remove(this._shadow); this.scene.remove(this._points); }
+      if (this.scene) { this.scene.remove(this.mesh); this.scene.remove(this._shadow); this.scene.remove(this._points); if (this._drone) this.scene.remove(this._drone); }
       if (this._pGeo) this._pGeo.dispose();
     }
 
     // ------------------------------------------------------------ collisions
-    static resolveCollisions(karts) {
-      const n = karts.length;
+    // slipstream: idempotent per step (safe if main also calls it)
+    static updateDrafting(karts) {
+      const dt = 1 / 60, n = karts.length;
+      Kart._karts = karts;
       for (let i = 0; i < n; i++) {
         const a = karts[i];
-        if (!a || a.falling) continue;
+        if (!a || a.ghost || a._draftSeen === a._frame) continue;
+        a._draftSeen = a._frame;
+        let on = false;
+        const ok = !a.falling && !a.cannonFlight && !a.rescued && a.spinTimer <= 0 && a._draftCd <= 0 && a.speed > 0.7 * a.stats.topSpeed;
+        if (ok) {
+          const fx = Math.sin(a.heading), fz = Math.cos(a.heading);
+          for (let j = 0; j < n && !on; j++) {
+            const b = karts[j];
+            if (!b || b === a || b.ghost || b.falling || b.cannonFlight || b.speed < 0.7 * b.stats.topSpeed) continue;
+            const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
+            const d2 = dx * dx + dz * dz;
+            if (d2 > DRAFT_RANGE * DRAFT_RANGE || d2 < 4) continue;
+            const along = dx * fx + dz * fz;
+            if (along <= 0 || along * along < DRAFT_COS * DRAFT_COS * d2) continue;
+            if (Math.abs(a.pos.y - b.pos.y) > 3) continue;
+            on = true;
+          }
+        }
+        if (on) {
+          a._draft += dt;
+          if ((a._frame % 3) === 0) {
+            const sd = (a._frame & 3) ? 0.9 : -0.9;
+            a._emit(a._wx(-2.0, sd), a.pos.y + 0.5, a._wz(-2.0, sd), -Math.sin(a.heading) * 5, 0.2, -Math.cos(a.heading) * 5, 0.8, 0.9, 1, 0.3, 0);
+          }
+          if (a._draft >= DRAFT_NEED) {
+            a._draft = 0; a._draftCd = 1.5;
+            a._boost(1.2, 1, false);
+            a._snd('slipstream');
+          }
+        } else if (a._draft > 0) a._draft = Math.max(0, a._draft - dt * 2);
+        a.drafting01 = clamp(a._draft / DRAFT_NEED, 0, 1);
+      }
+    }
+
+    static resolveCollisions(karts) {
+      const n = karts.length;
+      Kart.updateDrafting(karts);
+      for (let i = 0; i < n; i++) {
+        const a = karts[i];
+        if (!a || a.falling || a.ghost || a.cannonFlight) continue;
         for (let j = i + 1; j < n; j++) {
           const b = karts[j];
-          if (!b || b.falling) continue;
+          if (!b || b.falling || b.ghost || b.cannonFlight) continue;
           const ra = 1.2 * (a.shrinkTimer > 0 ? 0.5 : 1);
           const rb = 1.2 * (b.shrinkTimer > 0 ? 0.5 : 1);
           const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
@@ -910,7 +1277,7 @@
           let d = Math.sqrt(d2), nx, nz;
           if (d < 1e-4) { nx = 1; nz = 0; d = 0; } else { nx = dx / d; nz = dz / d; }
           const overlap = rr - d;
-          const ma = a.stats.mass, mb = b.stats.mass;
+          const ma = Math.pow(a.stats.mass, 1.5), mb = Math.pow(b.stats.mass, 1.5); // heavy karts shove light ones
           const wa = mb / (ma + mb), wb = ma / (ma + mb); // share of push for a, b
           a.pos.x -= nx * overlap * wa; a.pos.z -= nz * overlap * wa;
           b.pos.x += nx * overlap * wb; b.pos.z += nz * overlap * wb;

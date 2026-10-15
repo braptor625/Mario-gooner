@@ -173,54 +173,95 @@
     },
   };
 
-  G.TRACKS = [
-    { id: 'meadow', name: 'Meadow Loop', cup: 'comet', theme: 'meadow', laps: 3, music: 'meadow' },
-    { id: 'dunes', name: 'Sunscorch Dunes', cup: 'comet', theme: 'dunes', laps: 3, music: 'dunes' },
-    { id: 'glacier', name: 'Glacier Pass', cup: 'comet', theme: 'glacier', laps: 3, music: 'glacier' },
-    { id: 'starlight', name: 'Starlight Ribbon', cup: 'comet', theme: 'starlight', laps: 3, music: 'starlight' },
-    // Nova Cup: the same circuits driven in reverse
-    { id: 'glacier_r', name: 'Glacier Pass R', cup: 'nova', theme: 'glacier', laps: 3, music: 'glacier', reversed: true },
-    { id: 'dunes_r', name: 'Sunscorch Dunes R', cup: 'nova', theme: 'dunes', laps: 3, music: 'dunes', reversed: true },
-    { id: 'meadow_r', name: 'Meadow Loop R', cup: 'nova', theme: 'meadow', laps: 3, music: 'meadow', reversed: true },
-    { id: 'starlight_r', name: 'Starlight Ribbon R', cup: 'nova', theme: 'starlight', laps: 3, music: 'starlight', reversed: true },
+  // ---------------------------------------------------------------- registry (v2)
+  // Built-in defs above stay available (attract mode / legacy ids) but cups are populated by
+  // js/tracks/cup_*.js through G.defineTrack().
+  const CUP_ORDER = [
+    { id: 'mushroom', name: 'Mushroom Cup' },
+    { id: 'flower', name: 'Flower Cup' },
+    { id: 'star', name: 'Star Cup' },
+    { id: 'special', name: 'Special Cup' },
   ];
-  G.CUPS = [
-    { id: 'comet', name: 'Comet Cup', tracks: ['meadow', 'dunes', 'glacier', 'starlight'] },
-    { id: 'nova', name: 'Nova Cup', tracks: ['glacier_r', 'dunes_r', 'meadow_r', 'starlight_r'] },
-  ];
+  G.TRACKS = [];
+  G.CUPS = [];
+  function rebuildLists() {
+    const list = [];
+    for (const id in DEFS) {
+      const d = DEFS[id];
+      if (!d.cup) continue;
+      const th = typeof d.theme === 'object' ? d.theme : THEMES[d.theme] || THEMES.meadow;
+      list.push({
+        id, name: d.name, cup: d.cup, order: d.order || 9, laps: d.laps || 3,
+        theme: d.style || (typeof d.theme === 'string' ? d.theme : 'custom'), music: d.music || 'circuit',
+        preview: { sky: th.sky ? th.sky[0] : 0x6fb6ff, ground: th.ground, road: th.road ? th.road[0] : 0x555555 },
+      });
+    }
+    const cupIdx = (c) => { const i = CUP_ORDER.findIndex((x) => x.id === c); return i < 0 ? 99 : i; };
+    list.sort((a, b) => cupIdx(a.cup) - cupIdx(b.cup) || a.order - b.order);
+    G.TRACKS.length = 0;
+    list.forEach((t) => G.TRACKS.push(t));
+    G.CUPS.length = 0;
+    CUP_ORDER.forEach((c) => {
+      const tracks = list.filter((t) => t.cup === c.id).map((t) => t.id);
+      if (tracks.length) G.CUPS.push({ id: c.id, name: c.name, tracks });
+    });
+    if (list.length >= 8) G.CUPS.push({ id: 'allcup', name: 'All-Cup Tour', tracks: list.map((t) => t.id), allCup: true });
+  }
+  G.defineTrack = function (def) {
+    if (!def || !def.id || !def.pts) throw new Error('defineTrack: id and pts required');
+    DEFS[def.id] = Object.assign({ hw: 12, shoulder: 5, scale: 1, seed: 7, pads: [], jumps: [], arches: [], lakeDist: 0 }, def);
+    rebuildLists();
+  };
+  G.getTrackDef = (id) => DEFS[id];
+  // legacy built-ins are still reachable by id but not listed in cups
+  ['meadow', 'dunes', 'glacier', 'starlight'].forEach((id) => { DEFS[id].builtin = true; DEFS[id].builtinScenery = true; DEFS[id].style = id; });
 
+  const ZONE_COLORS = { ice: 0xa9d9ff, mud: 0x6b4a2b, water: 0x3aa7e0, sand: 0xe3c27a, grass: 0x5cae3e, void: 0xff5a1f, offroad: 0x7a8a50 };
   const EMB = 10;     // embankment width beyond the shoulder
   const CELL = 32;    // spatial hash cell
 
   // ---------------------------------------------------------------- Track
   class Track {
-    constructor(trackId, scene) {
+    constructor(trackId, scene, opts) {
+      opts = opts || {};
       this.scene = scene;
       this.id = trackId;
-      const rev = /_r$/.test(trackId);
+      const rev = /_r$/.test(trackId) && !DEFS[trackId];
       const baseId = rev ? trackId.slice(0, -2) : trackId;
       const base = DEFS[baseId];
       if (!base) throw new Error('Unknown track ' + trackId);
       this.rev = rev;
+      this.mirror = !!opts.mirror;
       this.def = Object.assign({ id: trackId, rev: rev }, base);
-      this.theme = base.theme;
-      this.cfg = THEMES[base.theme];
+      this.laps = base.laps || 3;
+      this.theme = base.style || (typeof base.theme === 'string' ? base.theme : 'custom');
+      const baseTheme = THEMES[typeof base.theme === 'string' ? base.theme : base.style] || THEMES.meadow;
+      this.cfg = typeof base.theme === 'object' ? Object.assign({}, baseTheme, base.theme) : baseTheme;
       this.noWalls = !!base.noWalls;
       this.shoulder = base.shoulder;
+      this.offroadSurface = base.offroad || 'offroad';
       this.rng = mulberry(base.seed + (rev ? 1000 : 0));
       this._time = 0;
       this._geoms = []; this._mats = []; this._objs = []; this._tex = [];
       this._anim = {};
+      this._hazards = [];
+      this._hazOut = [];
       this._res = {
         index: 0, dist: 0, lateral: 0, halfWidth: 12, wallDist: 17, y: 0, onRoad: true, surface: 'road',
-        tx: 0, tz: 1, rx: -1, rz: 0,
+        tx: 0, tz: 1, rx: -1, rz: 0, cannonTo: 0, cannonHeight: 0,
       };
+      // everything built for this track lives under root (scale.x = -1 in mirror mode)
+      this.root = new THREE.Group();
+      if (this.mirror) this.root.scale.x = -1;
+      scene.add(this.root);
       this._sampleCurve(base, rev);
       this._buildRects(base, rev);
       this._buildGrid();
       this._buildItemSpots();
       this._buildMinimap();
       this._buildWorld(base, rev);
+      this._buildCustom(base);
+      this._mirrorPublicData();
     }
 
     // ------------------------------------------------ spline sampling
@@ -281,13 +322,18 @@
 
     _buildRects(def, rev) {
       const L = this.length, r = [];
-      const add = (a, kind) => {
+      const add = (a, kind, extra) => {
         const d0 = a.d, d1 = a.d + a.len, l0 = a.l - a.w / 2, l1 = a.l + a.w / 2;
-        if (rev) r.push({ d0: L - d1, d1: L - d0, l0: -l1, l1: -l0, kind });
-        else r.push({ d0, d1, l0, l1, kind });
+        let q;
+        if (rev) q = { d0: L - d1, d1: L - d0, l0: -l1, l1: -l0, kind };
+        else q = { d0, d1, l0, l1, kind };
+        if (extra) Object.assign(q, extra);
+        r.push(q);
       };
-      (def.pads || []).forEach((p) => add(p, 1));
-      (def.jumps || []).forEach((p) => add(p, 2));
+      (def.pads || []).forEach((p) => add(p, 'boost'));
+      (def.jumps || []).forEach((p) => add(p, 'jump'));
+      (def.cannons || []).forEach((p) => add(p, 'cannon', { to: p.to, height: p.height || 40 }));
+      (def.zones || []).forEach((p) => add(p, p.surface || 'offroad', { color: p.color, offroadToo: !!p.offroad, id: p.id, active: p.active !== false, decal: p.decal !== false }));
       this.rects = r;
       this.nrect = r.length;
     }
@@ -320,14 +366,23 @@
     }
 
     // ------------------------------------------------ public query API
-    query(x, z, hint) {
+    query(x, z, hint, y) {
+      if (!this.mirror) return this._queryRaw(x, z, hint, y);
+      const r = this._queryRaw(-x, z, hint, y);
+      r.lateral = -r.lateral; r.tx = -r.tx; r.rz = -r.rz;
+      return r;
+    }
+    _queryRaw(x, z, hint, y) {
       const N = this.N, px = this.px, pz = this.pz, r = this._res;
+      const useY = y !== undefined && y === y;
       let best = -1, bd = 1e18;
       if (hint !== undefined && hint >= 0) {
         hint = hint | 0; if (hint >= N) hint %= N;
         for (let k = -40; k <= 40; k++) {
           let i = hint + k; if (i < 0) i += N; else if (i >= N) i -= N;
-          const dx = x - px[i], dz = z - pz[i], d = dx * dx + dz * dz;
+          const dx = x - px[i], dz = z - pz[i];
+          let d = dx * dx + dz * dz;
+          if (useY) { const dy = y - this.py[i]; d += dy * dy * 4; }
           if (d < bd) { bd = d; best = i; }
         }
         const lim = 2 * this.hw[best] + 30;
@@ -336,7 +391,9 @@
       if (best < 0) {
         bd = 1e18;
         for (let i = 0; i < N; i++) {
-          const dx = x - px[i], dz = z - pz[i], d = dx * dx + dz * dz;
+          const dx = x - px[i], dz = z - pz[i];
+          let d = dx * dx + dz * dz;
+          if (useY) { const dy = y - this.py[i]; d += dy * dy * 4; }
           if (d < bd) { bd = d; best = i; }
         }
       }
@@ -353,18 +410,24 @@
       let dist = (j + t) * this.ds; if (dist >= this.length) dist -= this.length;
       const hw = this.hw[j] + (this.hw[j2] - this.hw[j]) * t;
       const a = lat < 0 ? -lat : lat;
-      let surface = 'offroad';
-      if (a <= hw) {
-        surface = 'road';
+      let surface = this.offroadSurface;
+      r.cannonTo = 0; r.cannonHeight = 0;
+      if (a <= hw) surface = 'road';
+      else if (this.noWalls && a > hw + 1) surface = 'void';
+      if (surface !== 'void') {
         for (let k = 0; k < this.nrect; k++) {
           const q = this.rects[k];
-          if (dist >= q.d0 && dist <= q.d1 && lat >= q.l0 && lat <= q.l1) { surface = q.kind === 1 ? 'boost' : 'jump'; break; }
+          if (q.active !== false && dist >= q.d0 && dist <= q.d1 && lat >= q.l0 && lat <= q.l1 && (a <= hw || q.offroadToo)) {
+            surface = q.kind;
+            if (q.kind === 'cannon') { r.cannonTo = q.to; r.cannonHeight = q.height; }
+            break;
+          }
         }
-      } else if (this.noWalls && a > hw + 1) surface = 'void';
+      }
       r.index = i; r.dist = dist; r.lateral = lat; r.halfWidth = hw;
       r.wallDist = this.noWalls ? hw + 1 : hw + this.shoulder;
       r.y = this.py[j] + (this.py[j2] - this.py[j]) * t;
-      r.onRoad = a <= hw; r.surface = surface;
+      r.onRoad = a <= hw && surface !== 'void'; r.surface = surface;
       let tx = this.tx[j] + (this.tx[j2] - this.tx[j]) * t, tz = this.tz[j] + (this.tz[j2] - this.tz[j]) * t;
       const tl = Math.hypot(tx, tz) || 1;
       r.tx = tx / tl; r.tz = tz / tl; r.rx = rx; r.rz = rz;
@@ -385,11 +448,15 @@
       o.halfWidth = this.hw[i] + (this.hw[j] - this.hw[i]) * t;
       return o;
     }
+    _mf(o) {
+      if (this.mirror) { o.x = -o.x; o.tx = -o.tx; o.rz = -o.rz; }
+      return o;
+    }
     pointAt(dist) {
-      return this._frame(dist, { x: 0, y: 0, z: 0, tx: 0, tz: 1, rx: -1, rz: 0, halfWidth: 12 });
+      return this._mf(this._frame(dist, { x: 0, y: 0, z: 0, tx: 0, tz: 1, rx: -1, rz: 0, halfWidth: 12 }));
     }
     respawnPoint(dist) {
-      const p = this._frame(dist, { x: 0, y: 0, z: 0, tx: 0, tz: 1, rx: -1, rz: 0, halfWidth: 12 });
+      const p = this._mf(this._frame(dist, { x: 0, y: 0, z: 0, tx: 0, tz: 1, rx: -1, rz: 0, halfWidth: 12 }));
       return { x: p.x, y: p.y, z: p.z, heading: Math.atan2(p.tx, p.tz) };
     }
     getStartGrid(n) {
@@ -398,7 +465,7 @@
       for (let k = 0; k < n; k++) {
         const row = k >> 1, side = k & 1 ? 1 : -1;
         const d = this.length - 8 - row * 6 - (k & 1 ? 3 : 0);
-        this._frame(d, tmp);
+        this._mf(this._frame(d, tmp));
         const lat = side * 4;
         out.push({ x: tmp.x + tmp.rx * lat, y: tmp.y, z: tmp.z + tmp.rz * lat, heading: Math.atan2(tmp.tx, tmp.tz) });
       }
@@ -408,18 +475,25 @@
     _buildItemSpots() {
       const spots = [], tmp = { x: 0, y: 0, z: 0, tx: 0, tz: 1, rx: -1, rz: 0, halfWidth: 12 };
       const L = this.length;
-      for (let r = 0; r < 5; r++) {
-        let d = L * (0.1 + 0.18 * r);
+      let rows = this.def.itemRows;
+      if (!rows) {
+        rows = [];
+        const nRows = L < 500 ? 2 : L > 1500 ? 6 : 5;
+        for (let r = 0; r < nRows; r++) rows.push({ d: L * (0.1 + (0.9 / nRows) * r), count: 5 });
+      } else if (this.rev) rows = rows.map((q) => Object.assign({}, q, { d: L - q.d }));
+      for (const row of rows) {
+        let d = row.d;
         for (let tries = 0; tries < 12; tries++) {
           let bad = d < 20 || d > L - 20;
           for (let k = 0; k < this.nrect; k++) if (d > this.rects[k].d0 - 14 && d < this.rects[k].d1 + 14) bad = true;
-          if (!bad) break;
+          if (!bad || this.def.itemRows) break;
           d += 12;
         }
         this._frame(d, tmp);
-        for (let k = 0; k < 5; k++) {
-          const l = (k - 2) * tmp.halfWidth * 0.38;
-          spots.push({ x: tmp.x + tmp.rx * l, y: tmp.y, z: tmp.z + tmp.rz * l });
+        const n = row.count || 5;
+        for (let k = 0; k < n; k++) {
+          const l = (k - (n - 1) / 2) * tmp.halfWidth * (n > 1 ? 1.5 / (n - 1) : 0);
+          spots.push({ x: tmp.x + tmp.rx * l, y: tmp.y, z: tmp.z + tmp.rz * l, double: !!row.double });
         }
       }
       this.itemBoxSpots = spots;
@@ -453,7 +527,7 @@
       if (noCull) m.frustumCulled = false;
       return this._add(m);
     }
-    _add(o) { this.scene.add(o); this._objs.push(o); return o; }
+    _add(o) { this.root.add(o); this._objs.push(o); return o; }
     _P(i, l, dy) {
       return [this.px[i] + this.rx[i] * l, this.py[i] + dy, this.pz[i] + this.rz[i] * l];
     }
@@ -486,9 +560,10 @@
 
       // reserved circles (lake) before scatter
       let lake = null;
-      if (theme === 'meadow') lake = this._findOpenSpot(48, 36);
+      if (!def.builtinScenery) { /* custom tracks decorate themselves */ }
+      else if (theme === 'meadow') lake = this._findOpenSpot(48, 36);
       else if (theme === 'glacier') {
-        const p = this.pointAt(this._dist(def.lakeDist));
+        const p = this._frame(this._dist(def.lakeDist), {});
         lake = { x: p.x, z: p.z, r: 52, onRoad: true };
       }
       this._lake = lake;
@@ -496,10 +571,10 @@
       this._buildSky(def);
       this._buildRoad(def);
       this._buildBoundaries(def);
-      if (!star) this._buildGround();
-      this._buildStartArch();
-      this._buildScenery(def, lake);
-      if (theme === 'glacier') this._buildSnow();
+      if (!star && def.ground !== false) this._buildGround();
+      if (def.startArch !== false) this._buildStartArch();
+      if (def.builtinScenery) this._buildScenery(def, lake);
+      if (theme === 'glacier' && (def.builtinScenery || def.snow)) this._buildSnow();
     }
 
     _findOpenSpot(r, margin) {
@@ -524,6 +599,7 @@
       const self = this;
       obj.onBeforeRender = function (renderer, scene, camera) {
         obj.position.copy(camera.position);
+        if (self.mirror) obj.position.x = -obj.position.x;
         if (spin) obj.rotation.y = self._time * spin;
         obj.updateMatrixWorld(true);
       };
@@ -612,7 +688,7 @@
       const N = this.N, ds = this.ds, star = this.theme === 'starlight';
       const rc = this._roadColors(), road = new Batch(), hwA = this.hw;
       const white = [1, 1, 1];
-      const ice = this.theme === 'glacier' ? { c: col(0xa9d9ff), c2: col(0x92c9f2) } : null;
+      const ice = this.theme === 'glacier' && def.builtinScenery ? { c: col(0xa9d9ff), c2: col(0x92c9f2) } : null;
       let iceD0 = 0, iceD1 = 0;
       if (ice) {
         const mid = this._dist(def.lakeDist), half = (def.iceLen || 100) / 2;
@@ -672,8 +748,18 @@
       const pad = new Batch();
       const orange = col(0xff8a00), yellow = col(0xfff25a), blue = col(0x2c6bff), wht = [1, 1, 1];
       for (let k = 0; k < this.nrect; k++) {
-        const q = this.rects[k], boost = q.kind === 1;
-        const base = boost ? orange : blue, chev = boost ? yellow : wht;
+        const q = this.rects[k], boost = q.kind === 'boost';
+        if (q.kind !== 'boost' && q.kind !== 'jump' && q.kind !== 'cannon') {
+          if (q.decal === false) continue;
+          // surface zone decal
+          const zc = q.color !== undefined ? col(q.color) : col(ZONE_COLORS[q.kind] || 0x777777);
+          for (let d = q.d0; d < q.d1 - 0.01; d += 2) {
+            const d2 = Math.min(q.d1, d + 2), sh = ((d / 2) | 0) & 1 ? 1 : 0.93;
+            pad.quad(this._PD(d, q.l0, 0.06), this._PD(d, q.l1, 0.06), this._PD(d2, q.l1, 0.06), this._PD(d2, q.l0, 0.06), mul(zc, sh));
+          }
+          continue;
+        }
+        const base = boost ? orange : q.kind === 'cannon' ? col(0x8a4a1c) : blue, chev = boost ? yellow : wht;
         for (let d = q.d0; d < q.d1 - 0.01; d += 2) {
           const d2 = Math.min(q.d1, d + 2);
           pad.quad(this._PD(d, q.l0, 0.07), this._PD(d, q.l1, 0.07), this._PD(d2, q.l1, 0.07), this._PD(d2, q.l0, 0.07), base);
@@ -685,7 +771,7 @@
           pad.quad(this._PD(dc, q.l0 + 0.4, 0.1), this._PD(dc + h, lc, 0.1), this._PD(dc + h + t, lc, 0.1), this._PD(dc + t, q.l0 + 0.4, 0.1), chev);
           pad.quad(this._PD(dc, q.l1 - 0.4, 0.1), this._PD(dc + h, lc, 0.1), this._PD(dc + h + t, lc, 0.1), this._PD(dc + t, q.l1 - 0.4, 0.1), chev);
         }
-        if (!boost) {
+        if (q.kind === 'jump') {
           // ramp lip posts
           const post = col(0xffffff);
           const a = this._PD(q.d0, q.l0 - 0.6, 0), b = this._PD(q.d0, q.l1 + 0.6, 0);
@@ -701,7 +787,7 @@
     // shoulders, embankments, walls/fences
     _buildBoundaries(def) {
       const N = this.N, star = this.theme === 'starlight', cfg = this.cfg, theme = this.theme;
-      if (star) return;
+      if (star || this.noWalls) return;
       const sh = this.shoulder, gy = this.groundY;
       const shC = col(cfg.shoulder), emC = col(cfg.emb), g = new Batch();
       for (let i = 0; i < N; i += 2) {
@@ -727,8 +813,13 @@
           w.quad(this._P(i, lo, y1), this._P(i, lo, y0), this._P(j, mo, y0), this._P(j, mo, y1), k);
         }
       };
+      const wallStyle = def.walls || (theme === 'meadow' ? 'fence' : theme === 'dunes' ? 'adobe' : 'barrier');
+      if (wallStyle === 'none') { this.wallMesh = null; return; }
+      const wc = def.wallColors ? def.wallColors.map(col) : null;
       for (let s = -1; s <= 1; s += 2) {
-        if (theme === 'meadow') {
+        if (wc) {
+          ribbon(s, 0, 0.9, 0, 1.1, 4, (i) => (((i >> 2) & 1) ? wc[0] : wc[1] || wc[0]));
+        } else if (wallStyle === 'fence') {
           const wood = col(0xb8844a), wood2 = col(0xa87438), post = col(0x8a5a2b);
           ribbon(s, 0, 0.14, 0.35, 0.55, 2, (i) => ((i >> 2) & 1 ? wood : wood2));
           ribbon(s, 0, 0.14, 0.8, 1.0, 2, (i) => ((i >> 2) & 1 ? wood : wood2));
@@ -736,7 +827,7 @@
             const p = this._P(i, s * (this.hw[i] + sh + 0.07), 0);
             w.box(p[0], p[1], p[2], 0.28, 1.15, 0.28, Math.atan2(this.tx[i], this.tz[i]), post);
           }
-        } else if (theme === 'dunes') {
+        } else if (wallStyle === 'adobe') {
           const a = col(0xcf9c5a), b = col(0xb98446);
           ribbon(s, 0, 0.9, 0, 1.1, 6, (i) => (((i / 6) | 0) & 1 ? a : b));
         } else {
@@ -983,7 +1074,7 @@
       const pts = new THREE.Points(g, m);
       pts.frustumCulled = false;
       pts.onBeforeRender = function (renderer, scene, camera) {
-        const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z, t = self._time;
+        const cx = self.mirror ? -camera.position.x : camera.position.x, cy = camera.position.y, cz = camera.position.z, t = self._time;
         const S = 120, H = 50;
         for (let i = 0; i < n; i++) {
           const bx = base[i * 3], by = base[i * 3 + 1], bz = base[i * 3 + 2];
@@ -996,9 +1087,75 @@
       this.snow = this._add(pts);
     }
 
+    // ------------------------------------------------ v2 content hooks
+    _kit() {
+      if (this._kitObj) return this._kitObj;
+      const self = this, ft = { x: 0, y: 0, z: 0, tx: 0, tz: 1, rx: -1, rz: 0, halfWidth: 12 };
+      this._kitObj = {
+        Batch, col, mix, mul, hsl, rng: this.rng, theme: this.cfg, length: this.length, groundY: this.groundY,
+        N: this.N, ds: this.ds, px: this.px, py: this.py, pz: this.pz, hw: this.hw, curv: this.curv,
+        at(d, l, dy) { return self._PD(d, l || 0, dy || 0); },
+        frame(d) { const f = self._frame(d, {}); return f; },
+        mesh(batch, matOpts, basic) { return self._mesh(batch, self._mat(matOpts || {}, !!basic), true); },
+        mat(opts, basic) { return self._mat(opts || {}, !!basic); },
+        add(o) { return self._add(o); },
+        trackGeom(g) { self._geoms.push(g); return g; },
+        trackMat(m) { self._mats.push(m); return m; },
+        scatter(count, off0, off1, margin, cb) { self._scatter(count, off0, off1, margin, cb); },
+        farScatter(count, minD, cb) { self._farScatter(count, minD, cb); },
+        clear(x, z, m) { return self.clear(x, z, m); },
+        reserve(x, z, r) { self._noGo.push({ x, z, r }); },
+        follow(obj, spin) { self._follow(obj, spin); },
+        makeCanvasTexture(w, h, draw) {
+          const c = document.createElement('canvas'); c.width = w; c.height = h;
+          draw(c.getContext('2d'), w, h);
+          const t = new THREE.CanvasTexture(c); self._tex.push(t); return t;
+        },
+        get time() { return self._time; },
+      };
+      return this._kitObj;
+    }
+    // zones with an id can be toggled at runtime (tides, gates): track.setZoneActive('tide', false)
+    setZoneActive(id, on) { for (const q of this.rects) if (q.id === id) q.active = on; }
+    _buildCustom(def) {
+      if (typeof def.decorate === 'function') def.decorate(this, this._kit());
+      if (typeof def.hazards === 'function') {
+        const list = def.hazards(this, this._kit()) || [];
+        for (const h of list) {
+          if (h.object3D && !h.object3D.parent) this._add(h.object3D);
+          this._hazards.push(h);
+        }
+      }
+    }
+    _mirrorPublicData() {
+      if (!this.mirror) return;
+      for (const s of this.itemBoxSpots) s.x = -s.x;
+      const m = this.minimap;
+      for (const p of m.points) p.x = -p.x;
+      const b = m.bounds, mx = b.minX;
+      b.minX = -b.maxX; b.maxX = -mx;
+    }
+    // world-space hazards for collision (reused array/objects)
+    getHazards() {
+      const out = this._hazOut, hz = this._hazards;
+      out.length = 0;
+      for (let i = 0; i < hz.length; i++) {
+        const h = hz[i];
+        if (h.active === false) continue;
+        let o = h._w; if (!o) o = h._w = { x: 0, y: 0, z: 0, radius: 1, hitKind: 'spin', vx: 0, vz: 0, ref: h };
+        o.x = this.mirror ? -h.x : h.x; o.y = h.y || 0; o.z = h.z;
+        o.radius = h.radius || 1.5; o.hitKind = h.hitKind || 'spin';
+        o.vx = this.mirror ? -(h.vx || 0) : h.vx || 0; o.vz = h.vz || 0;
+        out.push(o);
+      }
+      return out;
+    }
+
     // ------------------------------------------------ per-frame animation
     update(dt, time) {
       this._time = time;
+      for (let i = 0; i < this._hazards.length; i++) { const h = this._hazards[i]; if (h.update) h.update(dt, time); }
+      if (this.def.update) this.def.update(this, dt, time);
       if (this._padMat) { const k = 0.8 + 0.2 * Math.sin(time * 9); this._padMat.color.setRGB(k, k, k); }
       const w = this._anim.water;
       if (w) {
@@ -1016,6 +1173,7 @@
       this._objs.length = 0; this._geoms.length = 0; this._mats.length = 0;
       if (this.hemi && this.hemi.dispose) this.hemi.dispose();
       if (this.sun && this.sun.shadow && this.sun.shadow.map) this.sun.shadow.map.dispose();
+      if (this.root && this.root.parent) this.root.parent.remove(this.root);
       if (this.scene) { this.scene.fog = null; this.scene.background = null; }
     }
   }
