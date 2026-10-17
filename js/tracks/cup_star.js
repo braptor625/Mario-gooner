@@ -809,7 +809,7 @@
       hw: SERP_HW, shoulder: SERP_SH, scale: 1, style: 'meadow', ground: false, offroad: 'grass',
       walls: 'fence', wallColors: [0xf4efe0, 0xd9cfae],
       theme: {
-        sky: [0x2f8fe8, 0x9fdcf8, 0xcff1f6], fog: [0xbfe9f4, 160, 640], ground: 0x0a7fa6, shoulder: 0x77c35a,
+        sky: [0x2f8fe8, 0x9fdcf8, 0xcff1f6], fog: [0xbfe9f4, 160, 640], ground: 0x087096, shoulder: 0x77c35a,
         road: [0x7f766a, 0x776e62], curb: [0xff6a5a, 0xfff6e0], hemi: [0xdff4ff, 0x7fbf8a, 1.0], sun: [0xfff0d0, 0.9],
         emb: 0xe6d49a, bg: 0xbfe9f4,
       },
@@ -849,7 +849,7 @@
         if (dd <= 23) return roadH;
         return Math.max(0.04, roadH - (dd - 23) * 0.3);
       };
-      const seaC = col(0x0a7fa6);
+      const seaC = col(0x087096);
       const sand = col(0xe4d092), foam = col(0xcdeee8), shallow = col(0x3fc2b4);
       const terr = makeTerrain(kit, {
         direct: true, cell: 7, pad: 150,
@@ -880,7 +880,7 @@
       // sea plane (same lambert colour as the far shelf)
       {
         const g = kit.trackGeom(new T.PlaneGeometry(7000, 7000)); g.rotateX(-Math.PI / 2);
-        const m = new T.Mesh(g, kit.trackMat(new T.MeshLambertMaterial({ color: 0x0a7fa6 })));
+        const m = new T.Mesh(g, kit.trackMat(new T.MeshLambertMaterial({ color: 0x087096 })));
         m.position.set(0, 0, 0); m.frustumCulled = false; kit.add(m);
       }
       // random point helper (accepts via cb returning true)
@@ -1079,12 +1079,12 @@
   // ====================================================================================================
   const PEAK_HW = 12, PEAK_SH = 4;
   const PEAK = (function () {
-    const corners = [[120, 0, 60], [215, 75, 60], [420, 75, 80], [410, 335, 100], [170, 342, 70], [55, 240, 50], [240, 238, 38], [225, 150, 38], [-20, 150, 50], [-35, 0, 60]];
+    const corners = [[120, 0, 60], [215, 75, 60], [420, 75, 80], [410, 335, 100], [170, 342, 60], [55, 240, 30], [240, 238, 38], [225, 150, 38], [-20, 150, 50], [-35, 0, 60]];
     const base = polyPts(corners, { step: 40, startT: 0.3 });
     const S0 = sampler(base), L = S0.L;
     const dCan = S0.dOf(292, 75), canLen = 22, climb = 300, dTo = dCan + canLen + climb;
     const dSumEnd = dTo + 70;
-    const H = 32;
+    const H = 30;
     const dBr = S0.dOf(105, 150), brHalf = 38;
     const dBr0 = dBr - brHalf, dBr1 = dBr + brHalf;
     const yAt = (d) => {
@@ -1109,7 +1109,7 @@
       hw: PEAK_HW, shoulder: PEAK_SH, scale: 1, style: 'meadow', offroad: 'grass', walls: 'none',
       theme: {
         sky: [0x3a86d8, 0xa9d8f2, 0xdcefe0], fog: [0xc6e2dc, 120, 560], ground: 0x2f7a35, shoulder: 0x6a8a3c,
-        road: [0x9a8566, 0x907c5f], curb: [0xd9c9a0, 0x8a6a3c], hemi: [0xe4f3ff, 0x6a8a50, 0.95], sun: [0xfff0d0, 0.9],
+        road: [0x7c6b52, 0x74644c], curb: [0xd9c9a0, 0x8a6a3c], hemi: [0xe4f3ff, 0x6a8a50, 0.95], sun: [0xfff0d0, 0.9],
         emb: 0x7a6040, bg: 0xc6e2dc,
       },
       pts: P.pts,
@@ -1137,8 +1137,270 @@
     });
   })();
 
-  function peakDecor() { return function () {}; }
-  function peakHazards() { return function () { return []; }; }
+  function peakDecor(P) {
+    return function (track, kit) {
+      const rng = kit.rng, col = kit.col, L = kit.length, HW = PEAK_HW, edge = PEAK_HW + PEAK_SH;
+      const ds = kit.ds;
+      const dClimb0 = P.dCan + P.canLen, dClimb1 = P.dTo;
+      const dBr0 = P.dBr0, dBr1 = P.dBr1;
+      const Mtn = (x, z) => 10 + 40 * Math.exp(-(Math.pow(x - 180, 2) + Math.pow(z - 255, 2)) / (2 * 170 * 170)) + 5 * Math.sin(x * 0.021) * Math.cos(z * 0.017);
+      const brG = (d) => Math.max(
+        1 - sstep(0, 6, Math.max(0, dBr0 + 10 - d, d - (dBr1 - 10))),
+        1 - sstep(0, 12, Math.max(0, dClimb0 + 24 - d, d - (dClimb1 - 16))));
+      const terr = makeTerrain(kit, {
+        cell: 6, pad: 150, shoulder: PEAK_SH, under: 0.9,
+        height: (x, z, i, dd, roadH) => {
+          if (i < 0) return Mtn(x, z);
+          const d = i * ds;
+          let n = dd <= 10 ? roadH : lerp(roadH, Mtn(x, z), sstep(10, 55, dd));
+          const g = brG(d);
+          if (g > 0) n = lerp(n, lerp(0.15, n, sstep(24, 44, dd)), g);
+          return n;
+        },
+        color: (x, z, h) => {
+          const nz = 1 + (rng() - 0.5) * 0.12;
+          if (h > 0 && h < 0.3) return kit.mul(col(0x2a2438), nz);              // ravine floor
+          if (h < 6) return kit.mul(col(((Math.floor(x / 9) + Math.floor(z / 9)) & 1) ? 0x3d9a3a : 0x338c35), nz);
+          if (h < 16) return kit.mul(col(((Math.floor(x / 7) + Math.floor(z / 7)) & 1) ? 0x5c8f3a : 0x6a8a3c), nz);
+          if (h < 27) return kit.mul(col(Math.floor(h / 3) & 1 ? 0x8a6c48 : 0x7e6140), nz);
+          return kit.mul(col(Math.floor(h / 3) & 1 ? 0x8f8070 : 0x7f7262), nz);
+        },
+      });
+      kit.mesh(terr.mesh, {}, false);
+      const th = terr.h;
+
+      const b = new kit.Batch();
+      // ---- jungle trees, ferns, rocks
+      const trunk = col(0x6a4a2a), gr = [col(0x2f8f3a), col(0x3fa645), col(0x24762f)], vine = col(0x2a6a2a);
+      const jtree = (x, y, z, s, r) => {
+        const lean = (r() - 0.5) * 1.2, h = (7 + r() * 4) * s;
+        tube(b, [x, y - 1, z], [x + lean, y + h, z], 0.9 * s, 0.55 * s, 6, trunk);
+        const c = gr[(r() * 3) | 0];
+        b.blob(x + lean, y + h + 1.5 * s, z, 5.6 * s, 3.4 * s, 5.6 * s, c, 0);
+        b.blob(x + lean + 2.8 * s, y + h - 0.4 * s, z + 1.4 * s, 4 * s, 2.6 * s, 4 * s, gr[(r() * 3) | 0], 0);
+        b.blob(x + lean - 2.4 * s, y + h - 0.6 * s, z - 1.8 * s, 3.8 * s, 2.4 * s, 3.8 * s, gr[(r() * 3) | 0], 0);
+        for (let k = 0; k < 2; k++) {
+          const a = r() * TAU, vx = x + lean + Math.cos(a) * 3 * s, vz = z + Math.sin(a) * 3 * s;
+          tube(b, [vx, y + h - 0.6 * s, vz], [vx, y + h - (3 + r() * 3) * s, vz], 0.1 * s, 0.07 * s, 3, vine);
+        }
+      };
+      kit.scatter(300, 2, 80, edge + 12, (x, z, i, r) => {
+        const h = th(x, z);
+        if (h > 17 || h < 0.5) return;
+        jtree(x, h, z, 0.8 + r() * 0.8, r);
+      });
+      kit.scatter(160, 1, 60, edge + 8, (x, z, i, r) => {
+        const h = th(x, z); if (h < 0.5) return;
+        const s = 0.8 + r() * 1.4;
+        for (let k = 0; k < 5; k++) { const a = (k / 5) * TAU + r(); b.tri([x, h + 0.2, z], [x + Math.cos(a) * 2.8 * s, h + 1.7 * s, z + Math.sin(a) * 2.8 * s], [x + Math.cos(a + 0.5) * 1.6 * s, h + 0.4 * s, z + Math.sin(a + 0.5) * 1.6 * s], gr[k % 3]); }
+      });
+      kit.scatter(150, 2, 90, edge + 8, (x, z, i, r) => {
+        const h = th(x, z); if (h < 0.5) return;
+        const s = 0.8 + r() * 2.6;
+        b.blob(x, h + 0.2 * s, z, 1.7 * s, 1.1 * s, 1.5 * s, kit.mul(col(0x8a7c6c), 0.85 + r() * 0.3), 1);
+      });
+      // ---- volcano backdrop
+      {
+        const vx = 165, vz = 585, cols = [col(0x5a4a40), col(0x6a584a), col(0x4a3c34), col(0x7a6656)];
+        let y = -2;
+        const rr = [175, 140, 105, 72, 46, 26], hh = [34, 38, 44, 44, 36, 20];
+        for (let k = 0; k < rr.length; k++) {
+          b.frustum(vx, y, vz, rr[k], k + 1 < rr.length ? rr[k + 1] * 1.02 : 18, hh[k], 11, cols[k % 4], k * 0.3);
+          y += hh[k] - 1;
+        }
+        // crater rim + glow
+        const lb = new kit.Batch();
+        lb.frustum(vx, y - 3, vz, 19, 15, 3.5, 11, col(0xff7a1a), 0.2);
+        for (let k = 0; k < 7; k++) {
+          const a = (k / 7) * TAU + 0.4, r0 = 20 + rng() * 4;
+          const top = [vx + Math.cos(a) * r0, y - 2, vz + Math.sin(a) * r0], bot = [vx + Math.cos(a) * (r0 + 60 + rng() * 60), y - 150 + rng() * 40, vz + Math.sin(a) * (r0 + 60 + rng() * 60)];
+          tube(lb, top, bot, 2.2, 3.4, 4, k & 1 ? col(0xff5a1a) : col(0xffa31a));
+        }
+        kit.mesh(lb, {}, true);
+        for (let k = 0; k < 9; k++) b.blob(vx + (rng() - 0.5) * 30 + k * 6, y + 14 + k * 11, vz + (rng() - 0.5) * 30, 14 + k * 1.6, 9 + k, 14 + k * 1.6, kit.mix(col(0x6a6a72), col(0xb8b8c0), k / 9), 0);
+      }
+      // far hills
+      kit.farScatter(22, 120, (x, z, r) => { const s = 40 + r() * 50; b.blob(x, -4, z, s * 1.4, s * 0.55, s, kit.mix(col(0x3f8a3a), col(0x6aa04a), r()), 1); });
+
+      // ---- rock walls along the road (not on the climb or bridge)
+      const rock = [col(0x8a7c6c), col(0x7a6c5c), col(0x988a78)];
+      const rockWall = (d0, d1) => {
+        for (const sd of [-1, 1]) for (let d = d0, k = 0; d < d1 - 0.1; d += 3.2, k++) {
+          const e = Math.min(d1, d + 3.2), f0 = kit.frame(d), f1 = kit.frame(e);
+          const l0 = sd * (f0.halfWidth + PEAK_SH + 0.1), l1 = sd * (f1.halfWidth + PEAK_SH + 0.1), tk = sd * 1.1, hgt = 1.3 + ((k * 37) % 5) * 0.12, c = rock[k % 3];
+          const A = kit.at(d, l0, 0), B = kit.at(e, l1, 0), A2 = kit.at(d, l0 + tk, 0), B2 = kit.at(e, l1 + tk, 0);
+          const up = (p) => [p[0], p[1] + hgt, p[2]];
+          b.quad(A, up(A), up(B), B, c); b.quad(up(A), up(A2), up(B2), up(B), kit.mul(c, 1.15)); b.quad(A2, B2, up(B2), up(A2), kit.mul(c, 0.9));
+        }
+      };
+      rockWall(8, P.dCan - 6); rockWall(P.dCan + P.canLen + 6, P.dCan + P.canLen + 30);
+      rockWall(P.dTo + 6, dBr0 + 6); rockWall(dBr1 - 6, L - 8);
+
+      // ---- climb: rope causeway (posts, ropes, torches) — the kart flies over it
+      {
+        const rope = col(0xcdb27a);
+        for (let d = dClimb0 + 8; d < dClimb1 - 4; d += 9) for (const sd of [-1, 1]) {
+          const f = kit.frame(d), l = sd * (f.halfWidth + 1.2);
+          const p = kit.at(d, l, 0), q = kit.at(d, l, 3.4);
+          tube(b, p, q, 0.28, 0.22, 5, trunk);
+          const n = kit.at(d + 9, l, 3.0);
+          tube(b, q, n, 0.07, 0.07, 3, rope);
+          if (((d / 9) | 0) % 3 === 0) { b.blob(q[0], q[1] + 0.6, q[2], 0.45, 0.6, 0.45, col(0xff9a1a), 0); }
+        }
+      }
+      // trestle legs holding the causeway up
+      for (let d = dClimb0 + 30; d < dClimb1 - 18; d += 22) {
+        const f = kit.frame(d);
+        if (f.y < 4) continue;
+        for (const sd of [-1, 1]) {
+          const p = kit.at(d, sd * (HW - 1), -0.4), q = kit.at(d, sd * (HW - 1), -f.y - 1);
+          tube(b, q, p, 0.7, 0.55, 6, trunk);
+        }
+        const a = kit.at(d, -(HW - 1), -f.y * 0.5), c = kit.at(d, HW - 1, -f.y * 0.5);
+        tube(b, a, c, 0.28, 0.28, 4, col(0x7a5230));
+        const a2 = kit.at(d, -(HW - 1), -0.5), c2 = kit.at(d, HW - 1, -f.y * 0.5);
+        tube(b, a2, c2, 0.2, 0.2, 4, col(0x7a5230));
+        const a3 = kit.at(d, HW - 1, -0.5), c3 = kit.at(d, -(HW - 1), -f.y * 0.5);
+        tube(b, a3, c3, 0.2, 0.2, 4, col(0x7a5230));
+      }
+      // ---- landing plaza + summit gate
+      {
+        const f = kit.frame(P.dTo + 10), hy = Math.atan2(f.tx, f.tz), stone = col(0x9a8c7a), st2 = col(0x7e725f);
+        for (const sd of [-1, 1]) {
+          const p = kit.at(P.dTo + 10, sd * (edge + 3), 0);
+          b.box(p[0], p[1] - 1, p[2], 4, 13, 4, hy, stone); b.box(p[0], p[1] + 11, p[2], 5, 1.6, 5, hy, st2);
+          b.blob(p[0], p[1] + 13.5, p[2], 1.2, 1.8, 1.2, col(0xff7a1a), 0);
+        }
+        const c = kit.at(P.dTo + 10, 0, 12.4);
+        b.box(c[0], c[1], c[2], 2 * (edge + 3) + 5, 2.2, 3.4, hy, stone);
+        for (let k = -3; k <= 3; k++) { const q = kit.at(P.dTo + 10, k * 4.4, 12.4); b.box(q[0], q[1] + 2.2, q[2], 1.6, 1.8, 3.6, hy, k & 1 ? col(0xd24a3a) : col(0xf0c030)); }
+      }
+      // ---- boulder cave arch where the boulders emerge
+      {
+        const dA = P.dTo + 85;
+        tunnel(kit, b, { d0: dA - 6, d1: dA + 6, step: 3, na: 12, rx: edge + 1, h: 10, thick: 5, y0: -1, color: (k, j, inner) => (inner ? col(0x4a4036) : rock[(k + j) % 3]), rim: (j) => (j & 1 ? col(0xb0a08a) : col(0x8a7c6c)) });
+      }
+      // ---- start line totems + jungle gate
+      for (const dd of [-18, 22]) for (const sd of [-1, 1]) {
+        const d = (dd + L) % L, p = kit.at(d, sd * (edge + 4.5), 0), f = kit.frame(d), hy = Math.atan2(f.tx, f.tz);
+        const cs = [col(0xd24a3a), col(0xf0c030), col(0x2f8fd0), col(0x2fa04a)];
+        for (let k = 0; k < 4; k++) {
+          b.box(p[0], p[1] + k * 2.6, p[2], 2.6, 2.6, 2.6, hy, kit.mul(cs[(k + (sd > 0 ? 1 : 0)) % 4], 0.9));
+          b.box(p[0] - f.tx * 1.31, p[1] + k * 2.6 + 0.7, p[2] - f.tz * 1.31, 1.9, 0.5, 0.2, hy, [0.1, 0.1, 0.1]);
+          b.box(p[0] - f.tx * 1.31, p[1] + k * 2.6 + 1.7, p[2] - f.tz * 1.31, 0.6, 0.6, 0.2, hy, [1, 1, 1]);
+        }
+        b.box(p[0], p[1] + 10.4, p[2], 3.6, 0.8, 3.6, hy, col(0x6a4a2a));
+      }
+      kit.mesh(b, {}, false);
+
+      // ---- giant barrel cannon
+      {
+        const cb = new kit.Batch(), d0 = P.dCan - 3, d1 = P.dCan + P.canLen + 3;
+        const w1 = col(0xa8743a), w2 = col(0x92602c), band = col(0x4a4a52);
+        tunnel(kit, cb, {
+          d0, d1, step: 2.2, na: 14, rx: edge + 1.6, h: 6.5, thick: 1.0, y0: -1.5,
+          hf: (d) => 6.5 + (d - d0) * 0.28,
+          color: (k, j, inner) => (inner ? col(0x4a2e18) : (Math.floor(k / 3) % 3 === 0 ? band : (j & 1 ? w1 : w2))),
+          rim: (j) => (j & 1 ? band : col(0x6a6a74)),
+        });
+        for (const dd of [d0 + 1, d1 - 1]) for (let k = -3; k <= 3; k++) { const p = kit.at(dd, k * 4.2, 0.1); cb.box(p[0], p[1] + 0.2, p[2], 0.9, 0.6, 0.9, 0, col(0xff9a1a)); }
+        kit.mesh(cb, {}, false);
+        // chevron arrow sign above the exit
+        const f = kit.frame(d1 + 1), hy = Math.atan2(f.tx, f.tz), sb = new kit.Batch();
+        for (const sd of [-1, 1]) { const p = kit.at(d1 + 6, sd * (edge + 3), 0); tube(sb, p, [p[0], p[1] + 7, p[2]], 0.3, 0.3, 5, trunk); sb.box(p[0], p[1] + 7, p[2], 0.3, 2.4, 2.4, hy, col(0xf0c030)); }
+        kit.mesh(sb, {}, false);
+      }
+      // ---- rope bridge: planks edge, posts, ropes, towers, mist
+      {
+        const bb = new kit.Batch(), rope = col(0xcdb27a), wood = col(0x7a5230);
+        const dA = dBr0 + 12, dB = dBr1 - 12;
+        for (let d = dA; d <= dB + 0.1; d += 4) for (const sd of [-1, 1]) {
+          const l = sd * 7.6, p = kit.at(d, l, 0), q = kit.at(d, l, 2.5);
+          tube(bb, p, q, 0.2, 0.2, 5, wood);
+          if (d + 4 <= dB + 0.1) {
+            const n = kit.at(d + 4, l, 2.5), sag = 0.25;
+            tube(bb, q, [(q[0] + n[0]) / 2, q[1] - sag, (q[2] + n[2]) / 2], 0.09, 0.09, 3, rope);
+            tube(bb, [(q[0] + n[0]) / 2, q[1] - sag, (q[2] + n[2]) / 2], n, 0.09, 0.09, 3, rope);
+            const q2 = kit.at(d, l, 1.0), n2 = kit.at(d + 4, l, 1.0);
+            tube(bb, q2, n2, 0.07, 0.07, 3, rope);
+          }
+        }
+        for (const [dd, sg] of [[dA, -1], [dB, 1]]) for (const sd of [-1, 1]) {
+          const p = kit.at(dd + sg * 0.5, sd * 8.6, -1), q = kit.at(dd + sg * 0.5, sd * 8.6, 7.5);
+          tube(bb, p, q, 0.55, 0.45, 6, wood);
+          const r = kit.at(dd + sg * 0.5, sd * 8.6, 7.7); bb.blob(r[0], r[1], r[2], 0.9, 0.9, 0.9, col(0xd24a3a), 0);
+        }
+        // hanging plank undersides (reads as a sagging deck)
+        for (let d = dA; d < dB; d += 3) { const a = kit.at(d, -6.6, -0.35), c = kit.at(d + 3, -6.6, -0.35), a2 = kit.at(d, 6.6, -0.35), c2 = kit.at(d + 3, 6.6, -0.35); bb.quad(a, c, c2, a2, ((d / 3) | 0) & 1 ? col(0x6a4426) : col(0x58381e)); }
+        kit.mesh(bb, {}, false);
+        const mf = kit.frame((dBr0 + dBr1) / 2);
+        const mg = kit.trackGeom(new T.PlaneGeometry(110, 150)); mg.rotateX(-Math.PI / 2);
+        const mm = new T.Mesh(mg, kit.trackMat(new T.MeshBasicMaterial({ color: 0xc8d6e0, transparent: true, opacity: 0.45, depthWrite: false })));
+        mm.position.set(mf.x, 3.4, mf.z); kit.add(mm);
+      }
+    };
+  }
+
+  // rolling boulders: one instanced mesh, no per-frame allocation
+  function peakHazards(P) {
+    return function (track, kit) {
+      const col = kit.col, list = [], HW = PEAK_HW;
+      const bg = new kit.Batch();
+      bg.blob(0, 0, 0, 1, 1, 1, col(0x8a7a68), 1);
+      bg.blob(0.55, 0.35, 0.3, 0.55, 0.5, 0.55, col(0x6a5c4c), 0);
+      bg.blob(-0.5, -0.1, 0.55, 0.5, 0.5, 0.5, col(0x9a8a76), 0);
+      bg.blob(0.1, 0.55, -0.6, 0.5, 0.45, 0.5, col(0x7a6a58), 0);
+      bg.blob(-0.4, -0.5, -0.4, 0.5, 0.5, 0.5, col(0x5e5242), 0);
+      const geo = kit.trackGeom(bg.build()), mat = kit.trackMat(new T.MeshLambertMaterial({ vertexColors: true }));
+      const lanes = [-6, 4, -2, 7, -7.5, 1, 6, -4];
+      const nLane = lanes.length, nCross = 4, total = nLane + nCross;
+      const mesh = new T.InstancedMesh(geo, mat, total);
+      mesh.frustumCulled = false; mesh.instanceMatrix.setUsage(T.DynamicDrawUsage); kit.add(mesh);
+      const dummy = new T.Object3D(); dummy.rotation.order = 'YXZ';
+      const R = 3.1;
+      const put = (i, x, y, z, ry, spin, sc) => {
+        dummy.position.set(x, y, z); dummy.rotation.set(spin, ry, 0); dummy.scale.set(sc * R, sc * R, sc * R);
+        dummy.updateMatrix(); mesh.setMatrixAt(i, dummy.matrix);
+      };
+      const dA = P.dTo + 90, dZ = P.dBr0 - 25, f = { x: 0, y: 0, z: 0, tx: 0, tz: 1, rx: -1, rz: 0, halfWidth: 12 };
+      for (let i = 0; i < nLane; i++) {
+        const v = 13 + (i % 4) * 2.2, travel = (dZ - dA) / v, T0 = travel + 2.5 + (i % 3) * 1.3, off = (i / nLane) * T0, lat0 = lanes[i];
+        const hz = { x: 0, y: 0, z: 0, radius: R, hitKind: 'flip', vx: 0, vz: 0, active: true };
+        hz.update = function (dt, time) {
+          const tt = (time + off) % T0;
+          if (tt > travel) { this.active = false; put(i, 0, -50, 0, 0, 0, 0.001); return; }
+          const d = dA + v * tt;
+          track._frame(d, f);
+          const l = lat0 + Math.sin(tt * 0.9 + i) * 2.2;
+          this.active = true;
+          this.x = f.x + f.rx * l; this.z = f.z + f.rz * l; this.y = f.y;
+          this.vx = f.tx * v; this.vz = f.tz * v;
+          const sc = Math.min(1, tt * 1.2);
+          put(i, this.x, f.y + R * sc, this.z, Math.atan2(f.tx, f.tz), -(v * tt) / R, sc);
+          if (i === nLane - 1) mesh.instanceMatrix.needsUpdate = true;
+        };
+        hz.update(0, 0); list.push(hz);
+      }
+      const crossD = [P.dTo + 190, P.dTo + 330, P.dTo + 520, P.dBr0 - 110];
+      for (let j = 0; j < nCross; j++) {
+        const i = nLane + j, sd = j & 1 ? 1 : -1, fr = kit.frame(crossD[j]), v = 11.5, span = 2 * (fr.halfWidth + 9);
+        const travel = span / v, T0 = travel + 3.2 + j * 0.9, off = j * 2.1;
+        const hz = { x: 0, y: 0, z: 0, radius: R, hitKind: 'flip', vx: 0, vz: 0, active: true };
+        hz.update = function (dt, time) {
+          const tt = (time + off) % T0;
+          if (tt > travel) { this.active = false; put(i, 0, -50, 0, 0, 0, 0.001); if (i === total - 1) mesh.instanceMatrix.needsUpdate = true; return; }
+          const l = sd * (fr.halfWidth + 9) - sd * v * tt;
+          this.active = true;
+          this.x = fr.x + fr.rx * l; this.z = fr.z + fr.rz * l; this.y = fr.y;
+          this.vx = -sd * v * fr.rx; this.vz = -sd * v * fr.rz;
+          put(i, this.x, fr.y + R, this.z, Math.atan2(this.vx, this.vz), (v * tt) / R, 1);
+          if (i === total - 1) mesh.instanceMatrix.needsUpdate = true;
+        };
+        hz.update(0, 0); list.push(hz);
+      }
+      return list;
+    };
+  }
 
   // @@END
 })();

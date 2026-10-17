@@ -376,3 +376,30 @@ Battle: 2-4 players (+ optional CPU fill), game type, arena. TT: course + ghost 
 2P = top/bottom halves, 3-4P = quadrants). DD HUD layout: item slots TOP-LEFT (big rear-rider slot,
 smaller front-rider slot, character face icons next to them), lap + time TOP-RIGHT, position BOTTOM-RIGHT
 (big), minimap RIGHT side (vertical), lap counter as "LAP 1/3". Battle HUD: balloons/shine timer/score.
+
+---------------------------------------------------------------------------------------------------
+# v3 — GAMECUBE-ERA GRAPHICS OVERHAUL
+Target look: Double Dash on GameCube — saturated, glossy, smooth-shaded toy-like models, shiny kart paint
+with environment reflections, soft bloom on bright surfaces, warm color grading, textured (not flat)
+ground/road surfaces, soft round particles, clean anti-aliasing. Still locked 60 fps on mid-range GPUs.
+
+## js/gfx.js (lead) → `G.GFX` (loaded right after util.js; every consumer must guard `G.GFX &&`)
+```
+G.GFX.quality            // 'high' | 'medium' | 'low' (auto-adjusted by main.js)
+G.GFX.envMap             // equirect THREE.Texture (sky/studio gradient) for glossy reflections (mapping set)
+G.GFX.tex.soft           // radial soft-dot CanvasTexture for Points/Sprites (smoke, dust, sparks)
+G.GFX.tex.spark          // 4-point star sparkle
+G.GFX.tex.detail         // tiling grayscale detail noise (RepeatWrapping)
+G.GFX.tex.asphalt / grass / sand / snow / dirt   // tiling color-neutral-ish detail textures (RepeatWrapping)
+G.GFX.shiny(opts) -> THREE.MeshPhongMaterial  // glossy toy paint: envMap, reflectivity ~0.25, shininess 60-90,
+                                               // specular 0x555555, vertexColors if opts.vertexColors; registers rim light
+G.GFX.patchRim(material, {color, strength, power})   // fresnel rim light (characters, karts, items)
+G.GFX.patchDetail(material, {scale=0.35, strength=0.35, macro=0.18})  // world-space detail texture
+                                               // modulation for big vertex-colored meshes (terrain, road, walls)
+G.GFX.water(opts{color, deep, opacity}) -> ShaderMaterial (animated waves, specular sun glint, fresnel)
+G.GFX.time               // seconds, advanced by main each frame (shader uniforms update automatically)
+G.GFX.setSun(dirVector3, colorHex)   // tracks call when building lights (water glints, lens flare)
+G.GFX.render(renderer, scene, views) // post pipeline: MSAA scene RT → bloom → grade/vignette → screen
+```
+Shadows (quality high, single-view): renderer.shadowMap PCFSoft; track.sun.castShadow handled by main;
+kart meshes castShadow=true, road/ground/scenery meshes receiveShadow=true (big props castShadow true).

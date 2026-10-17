@@ -517,7 +517,6 @@
       const dc = (d, lat, y, rx, ry, rz, c) => { const p = kit.at(d, lat, y); db.blob(p[0], p[1], p[2], rx, ry, rz, c, 1); };
       // body
       for (let k = -1; k <= 1; k++) dc(DR.dino + k * 6.5, 0, 25, 11.5, 9, 11.5, k === 0 ? skin2 : skin);
-      dc(DR.dino, 0, 20.5, 14, 4.6, 14, belly);
       for (let k = -2; k <= 2; k++) { const p = kit.at(DR.dino + k * 5.2, 0, 34); db.frustum(p[0], p[1], p[2], 1.8, 0, 4.2, 5, col(0x4d7a32), k); }
       for (let k = 0; k < 7; k++) dc(DR.dino - 9 + hash(k, 1) * 19, (hash(k, 2) - 0.5) * 14, 27 + hash(k, 3) * 6, 1.6, 1.2, 1.6, spot);
       // neck sweeping up and out over the left side, head looking down the road
@@ -610,6 +609,323 @@
       const f = track._drFall;
       if (f) { f[0].opacity = 0.74 + Math.sin(time * 7) * 0.08; f[1].opacity = 0.55 + Math.sin(time * 5 + 1) * 0.1; }
       if (track._drWater) track._drWater.position.y = Math.sin(time * 1.2) * 0.03;
+    },
+  });
+
+  // =====================================================================================
+  // 3. LAVA FORTRESS  (DD Bowser's Castle): drawbridge, smasher hall, fire bars, lava fireballs, flame statue, final jump
+  // =====================================================================================
+  const LF_SEGS = [['S', 136.8], ['A', 53.4, 91.8], ['S', 75.3], ['A', 48.8, -59.8], ['S', 60.3], ['A', 44, 160], ['S', 112.7], ['A', 63.4, -77.4], ['S', 45],
+    ['A', 50.9, 100.8], ['S', 156.5], ['A', 58.1, 100], ['S', 50.6], ['A', 45.3, -58.7], ['S', 49], ['A', 44, 103.5], ['S', 101.9]];
+  const LF_Y = keyY([[0, 3], [137, 3], [222, 3], [298, 3.5], [349, 4], [409, 4.5], [532, 4.5], [644, 4.5], [730, 5], [775, 6], [865, 8], [1021, 8], [1123, 5],
+    [1220, 4], [1269, 3.5], [1348, 3], [1450, 3]], 60);
+  const LF_HW = (d) => (d < 850 || d > 1040 ? 11 : d < 892 ? 11 - 3.5 * smooth((d - 850) / 42) : d < 998 ? 7.5 : 7.5 + 3.5 * smooth((d - 998) / 42));
+  const LF_PTS = turtle(LF_SEGS, 14, LF_Y, LF_HW);
+  const LF = {
+    bridge: [224, 296], hall: [534, 642], smash: [[556, -6.5, 0], [556, 6.5, 1.7], [590, 0, 0.9], [620, -6.5, 2.6], [620, 6.5, 0.4]],
+    statue: 382, bars: [[912, 0, 1.5], [962, 1.2, -1.5]], fire: [[792, 1], [816, -1], [840, 1], [1075, -1], [1100, 1]], gap: 1380,
+    open: [[222, 298], [788, 852], [892, 998], [1056, 1122], [1376, 1396]],
+  };
+  const T_SMASH = 3.4, UP_SMASH = 12;
+
+  G.defineTrack({
+    id: 'lava_fortress', name: 'Lava Fortress', cup: 'special', order: 3, laps: 3, music: 'fortress', seed: 3003,
+    hw: 11, shoulder: 1.2, scale: 1, walls: 'none', offroad: 'offroad',
+    theme: {
+      sky: [0x0b0610, 0x2a0a12, 0x5a1608], fog: [0x3a0e08, 110, 470], ground: 0xff5a14, shoulder: 0x3a3238,
+      road: [0x575a66, 0x4d505c], curb: [0xd23a1a, 0x2a2a30], hemi: [0xffb090, 0x4a1a10, 0.95], sun: [0xff9a60, 0.65], emb: 0x2e2a30, bg: 0x2a0a08,
+    },
+    pts: LF_PTS,
+    pads: [{ d: 24, len: 11, l: -5.5, w: 7 }, { d: 24, len: 11, l: 5.5, w: 7 }, { d: 305, len: 11, l: 0, w: 9 }, { d: 470, len: 11, l: 0, w: 9 }, { d: 658, len: 11, l: 0, w: 9 },
+      { d: 750, len: 11, l: 0, w: 9 }, { d: 868, len: 11, l: 0, w: 7 }, { d: 1030, len: 11, l: 0, w: 8 }, { d: 1190, len: 11, l: 0, w: 9 }, { d: 1350, len: 11, l: -5, w: 7 }, { d: 1350, len: 11, l: 5, w: 7 }],
+    jumps: [{ d: LF.gap, len: 3, l: 0, w: 22 }],
+    zones: (function () {
+      const z = [];
+      const side = (d0, d1, hw) => { for (const s of [-1, 1]) z.push({ d: d0, len: d1 - d0, l: s * (hw + 0.3 + 7), w: 14, surface: 'void', color: 0xff6a1a, offroad: true }); };
+      side(224, 296, 11); side(790, 850, 11); side(894, 996, 7.5); side(1058, 1120, 11);
+      z.push({ d: LF.gap + 3, len: 10, l: 0, w: 30, surface: 'void', color: 0xff5a12 });
+      return z;
+    })(),
+    itemRows: [{ d: 175, count: 5 }, { d: 400, count: 5, double: true }, { d: 520, count: 5 }, { d: 700, count: 5 }, { d: 860, count: 4, double: true }, { d: 1040, count: 5 }, { d: 1200, count: 5, double: true }, { d: 1320, count: 5 }],
+
+    decorate(track, kit) {
+      const col = kit.col, mul = kit.mul, mix = kit.mix, rng = kit.rng, L = kit.length, gy = kit.groundY;
+      const basalt = col(0x34303a), basalt2 = col(0x45414c), brick = col(0x5a5662), brick2 = col(0x4a4652), lavaC = col(0xff6a1a), gold = col(0xe0a82a), red = col(0x9a1c14);
+      // ---- sky: dark gradient dome + volcano silhouettes + embers (drawn over the engine's default backdrop)
+      { const geo = kit.trackGeom(new THREE.SphereGeometry(292, 20, 14)), pos = geo.attributes.position, cc = new Float32Array(pos.count * 3);
+        const top = col(0x07040c), mid = col(0x24080e), bot = col(0x7a2208);
+        for (let i = 0; i < pos.count; i++) { const v = pos.getY(i) / 292, c = v >= 0 ? mix(mid, top, Math.pow(v, 0.5)) : mix(mid, bot, Math.min(1, -v * 2.5)); cc.set(c, i * 3); }
+        geo.setAttribute('color', new THREE.BufferAttribute(cc, 3));
+        const m = new THREE.Mesh(geo, kit.trackMat(new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false, depthTest: false })));
+        m.renderOrder = -995; kit.follow(m); kit.add(m);
+        const vb = new kit.Batch();
+        for (let k = 0; k < 14; k++) {
+          const a = (k / 14) * TAU + rng() * 0.3, h = 50 + rng() * 70, r0 = 55 + rng() * 40, x = Math.cos(a) * 275, z = Math.sin(a) * 275;
+          vb.frustum(x, -20, z, r0, 7 + rng() * 5, h, 7, mix(col(0x1a1216), col(0x2c1a1a), rng()), rng() * 3);
+          vb.frustum(x, -20 + h - 2, z, 8 + rng() * 4, 6, 4, 7, col(0xff6a1a), 0);
+        }
+        vb.blob(-120, 140, 210, 22, 22, 22, col(0xffb070), 1);
+        const m2 = kit.mesh(vb, { fog: false, depthWrite: false }, true); m2.renderOrder = -994; kit.follow(m2);
+        // embers rising around the camera
+        const n = 260, base = new Float32Array(n * 3), pos2 = new Float32Array(n * 3);
+        for (let i = 0; i < n * 3; i++) base[i] = rng() * 100;
+        const g2 = kit.trackGeom(new THREE.BufferGeometry()), pa = new THREE.BufferAttribute(pos2, 3); pa.setUsage(THREE.DynamicDrawUsage); g2.setAttribute('position', pa);
+        const em = new THREE.Points(g2, kit.trackMat(new THREE.PointsMaterial({ color: 0xff8a2a, size: 0.55, sizeAttenuation: true, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending })));
+        em.frustumCulled = false;
+        em.onBeforeRender = function (renderer, scene, camera) {
+          const cx = track.mirror ? -camera.position.x : camera.position.x, cy = camera.position.y, cz = camera.position.z, t = track._time, S = 100, H = 40;
+          for (let i = 0; i < n; i++) {
+            pos2[i * 3] = cx - S / 2 + ((((base[i * 3] + Math.sin(t * 0.7 + i) * 2 - cx) % S) + S) % S);
+            pos2[i * 3 + 1] = cy - 12 + ((((base[i * 3 + 1] + t * (2.2 + (i % 5) * 0.6) - cy) % H) + H) % H);
+            pos2[i * 3 + 2] = cz - S / 2 + ((((base[i * 3 + 2] + Math.cos(t * 0.6 + i * 1.7) * 2 - cz) % S) + S) % S);
+          }
+          pa.needsUpdate = true;
+        };
+        kit.add(em);
+      }
+      // ---- crenellated walls and kerbs
+      const wb = new kit.Batch();
+      const open = LF.open;
+      const inOpen = (d) => open.some((o) => d >= o[0] - 3 && d <= o[1] + 3);
+      for (let d = 0; d < L - 2; d += 2.4) {
+        const k = (d / 2.4) | 0;
+        for (let s = -1; s <= 1; s += 2) {
+          const f = kit.frame(d + 1.2), l = s * (f.halfWidth + 1.2 + 0.6), hd = Math.atan2(f.tx, f.tz);
+          if (inOpen(d)) { // low stone kerb on the open (lava) edges
+            const lk = s * (f.halfWidth + 0.15);
+            wb.box(f.x + f.rx * lk, f.y - 0.2, f.z + f.rz * lk, 0.7, 0.65, 2.5, hd, k & 1 ? brick : red);
+          } else {
+            wb.box(f.x + f.rx * l, f.y - 0.4, f.z + f.rz * l, 1.2, 1.4, 2.5, hd, k & 1 ? brick : brick2);
+            if (k % 2 === 0) wb.box(f.x + f.rx * l, f.y + 1.0, f.z + f.rz * l, 1.3, 0.9, 1.3, hd, brick2);
+          }
+        }
+      }
+      kit.mesh(wb);
+
+      // ---- drawbridge with gatehouses
+      const bb = new kit.Batch(), wood = [col(0x5a3a20), col(0x4a2e18), col(0x6a4426)];
+      for (let d = LF.bridge[0]; d < LF.bridge[1] - 0.3; d += 1.5) {
+        const e = d + 1.3, fa = kit.frame(d), fb = kit.frame(e), w = fa.halfWidth + 0.8, k = wood[(((d / 1.5) | 0) * 5) % 3];
+        bb.quad([fa.x - fa.rx * w, fa.y + 0.12, fa.z - fa.rz * w], [fa.x + fa.rx * w, fa.y + 0.12, fa.z + fa.rz * w], [fb.x + fb.rx * w, fb.y + 0.12, fb.z + fb.rz * w], [fb.x - fb.rx * w, fb.y + 0.12, fb.z - fb.rz * w], k);
+      }
+      for (let s = -1; s <= 1; s += 2) wall(kit, bb, LF.bridge[0], LF.bridge[1], s, 0.7, 0.35, 0.5, col(0x2a2a30), col(0x3a3a42), 3);
+      for (let s = -1; s <= 1; s += 2) for (let d = LF.bridge[0] + 8; d < LF.bridge[1] - 4; d += 16) {
+        const f = kit.frame(d), l = s * (f.halfWidth + 1.2);
+        bb.box(f.x + f.rx * l, f.y, f.z + f.rz * l, 0.7, 4.5, 0.7, 0, col(0x2a2a30));
+        const p = kit.at(d + 8, l, 4.2); bb.box(p[0], p[1], p[2], 0.35, 0.35, 16, Math.atan2(f.tx, f.tz), col(0x6a6a74));
+      }
+      const tower = (d, s, sy) => {
+        const f = kit.frame(d), l = s * (f.halfWidth + 8), p = kit.at(d, l, 0);
+        bb.frustum(p[0], p[1] - 6, p[2], 7.5, 6.5, 8 + sy + 6, 10, brick, 0.3);
+        bb.frustum(p[0], p[1] + 8 + sy, p[2], 8.2, 8.2, 1.8, 10, brick2, 0.3);
+        for (let k = 0; k < 10; k++) { const a = (k / 10) * TAU; bb.box(p[0] + Math.cos(a) * 7.6, p[1] + 9.8 + sy, p[2] + Math.sin(a) * 7.6, 1.8, 1.6, 1.8, -a, brick); }
+        bb.frustum(p[0], p[1] + 8.5 + sy, p[2], 6.4, 0, 9, 10, red, 0);
+        bb.frustum(p[0], p[1] + 17.4 + sy, p[2], 0.15, 0.15, 4, 4, col(0xcccccc), 0);
+        bb.box(p[0] + 1.2, p[1] + 20 + sy, p[2], 2.4, 1.4, 0.15, 0, red);
+        const w2 = kit.at(d - s * 0, l - s * 7.4, 5); bb.box(w2[0], w2[1], w2[2], 1.6, 1.4, 1.6, 0, col(0xffb040));
+      };
+      for (const dd of [LF.bridge[0] - 4, LF.bridge[1] + 4]) { tower(dd, -1, 0); tower(dd, 1, 0); }
+      for (const dd of [LF.bridge[0] - 4, LF.bridge[1] + 4]) {
+        const f = kit.frame(dd), hd = Math.atan2(f.tx, f.tz), wd = f.halfWidth + 3.2;
+        bb.box(f.x, f.y + 11, f.z, 2 * wd + 2, 3.4, 3.4, hd, brick2);
+        for (let k = -3; k <= 3; k++) bb.box(f.x + f.rx * k * 3.2, f.y + 14.4, f.z + f.rz * k * 3.2, 1.8, 1.4, 1.8, hd, brick);
+        bb.box(f.x, f.y + 9.9, f.z, 2 * wd - 4, 1, 3, hd, col(0x2a2a30));
+      }
+      kit.mesh(bb);
+
+      // ---- castle hall (stone vault with pillars, torches and banners)
+      const hb = new kit.Batch(), tb = new kit.Batch();
+      tunnel(kit, hb, LF.hall[0], LF.hall[1], { h: 17, w: 3.5, rough: 0.0, pal: [col(0x3c3a46), col(0x34323d), col(0x45424f)], drop: 8, taper: 8, segs: 12, step: 4 });
+      for (let d = LF.hall[0] + 8; d < LF.hall[1]; d += 16) for (let s = -1; s <= 1; s += 2) {
+        const f = kit.frame(d), l = s * (f.halfWidth + 2.6), p = kit.at(d, l, 0), hd = Math.atan2(f.tx, f.tz);
+        hb.box(p[0], p[1] - 1, p[2], 2.6, 16, 2.6, hd, brick); hb.box(p[0], p[1] + 14.6, p[2], 3.4, 1.2, 3.4, hd, brick2);
+        tb.box(p[0] - f.rx * s * 1.7, p[1] + 5, p[2] - f.rz * s * 1.7, 0.5, 0.9, 0.5, 0, col(0x222222));
+        tb.blob(p[0] - f.rx * s * 1.7, p[1] + 6.2, p[2] - f.rz * s * 1.7, 0.6, 0.9, 0.6, col(0xffa030), 0);
+        const q = kit.at(d + 8, s * (f.halfWidth + 1.8), 12); hb.box(q[0], q[1] - 4, q[2], 0.2, 8, 2.4, hd, s < 0 ? red : col(0x20203a));
+      }
+      for (const dd of [LF.hall[0] + 1, LF.hall[1] - 1]) {
+        const f = kit.frame(dd), hd = Math.atan2(f.tx, f.tz), wd = f.halfWidth + 4;
+        for (let s = -1; s <= 1; s += 2) { const x = f.x + f.rx * s * wd, z = f.z + f.rz * s * wd; hb.box(x, f.y - 2, z, 3.4, 15, 3.4, hd, brick); }
+        hb.box(f.x, f.y + 13, f.z, 2 * wd + 3, 3, 3.6, hd, brick2);
+        for (let k = -3; k <= 3; k++) hb.box(f.x + f.rx * k * 4, f.y + 15.3, f.z + f.rz * k * 4, 2.4, 1.6, 2.4, hd, brick);
+      }
+      kit.mesh(hb); kit.mesh(tb, {}, true);
+
+      // ---- flame-spitting dragon idol
+      const sb = new kit.Batch(), sd = LF.statue;
+      { const f = kit.frame(sd), hd = Math.atan2(f.tx, f.tz), base = f.halfWidth + 14, S = (dd, lat, y) => kit.at(sd + dd, base + lat, y);
+        const bx = (dd, lat, y, sx, sy, sz, c) => { const p = S(dd, lat, y); sb.box(p[0], p[1], p[2], sx, sy, sz, hd, c); };
+        bx(0, 0, -4, 20, 4, 22, basalt2); bx(0, 0, -0.5, 16, 3, 18, basalt);
+        bx(0, 6, 2.5, 12, 20, 14, basalt);               // torso (leans away from the road)
+        bx(-7.5, 5, 4, 3.4, 11, 4, basalt2); bx(7.5, 5, 4, 3.4, 11, 4, basalt2); // arms
+        bx(-9.5, 5, 0.5, 5, 2.4, 5, brick2); bx(9.5, 5, 0.5, 5, 2.4, 5, brick2);
+        bx(0, 0.6, 22, 9, 8, 9, basalt2);               // head
+        bx(0, -4.4, 19, 8, 2.6, 7, basalt);              // jaw (towards road)
+        bx(0, -5.4, 22.2, 3.6, 2.4, 5, col(0xff7a20));   // glowing maw
+        for (const e of [-2.6, 2.6]) { bx(e, -4.2, 25.2, 1.8, 1.5, 0.8, col(0xff3a10)); }
+        for (const e of [-1, 1]) { const p = S(e * 4.2, 1, 30); sb.frustum(p[0], p[1] - 3, p[2], 1.5, 0, 6, 6, brick, 0); }
+        for (const e of [-3.4, -1.1, 1.1, 3.4]) { const p = S(e, -4.8, 18.4); sb.frustum(p[0], p[1], p[2], 0.5, 0, 1.4, 4, col(0xe8e0d0), 0); }
+        const p = S(0, 8, 14); sb.frustum(p[0], p[1], p[2], 5, 1.5, 12, 8, basalt2, 0.2); // wings/ridge
+        const pl = S(0, 0, 0); track._lfMouth = S(0, -5.4, 22.2);
+      }
+      kit.mesh(sb);
+      // lava pits / braziers beside the statue
+      const bz = new kit.Batch();
+      for (const dd of [-14, 14]) { const p = kit.at(sd + dd, kit.frame(sd).halfWidth + 3.5, 0); bz.frustum(p[0], p[1] - 0.6, p[2], 1.0, 1.5, 2.2, 6, basalt2, 0); bz.blob(p[0], p[1] + 2.4, p[2], 1.3, 1.5, 1.3, col(0xff7a1a), 0); }
+      kit.mesh(bz, {}, true);
+
+      // ---- central keep + corner towers (inside the loop)
+      const kb = new kit.Batch();
+      let cx = 0, cz = 0, cn = 0;
+      for (let i = 0; i < kit.N; i += 8) { cx += kit.px[i]; cz += kit.pz[i]; cn++; }
+      cx /= cn; cz /= cn;
+      const kp = [[cx, cz, 1.0]];
+      let best = null, bd = -1;
+      for (let x = cx - 90; x <= cx + 90; x += 10) for (let z = cz - 90; z <= cz + 90; z += 10) { let m = 1e9; for (let i = 0; i < kit.N; i += 4) m = Math.min(m, Math.hypot(x - kit.px[i], z - kit.pz[i])); if (m > bd) { bd = m; best = [x, z]; } }
+      const kxz = best, kg = gy - 1, kr = Math.min(40, bd - 24);
+      if (kr > 12) {
+        const [kx, kz] = kxz;
+        kb.frustum(kx, kg, kz, kr, kr * 0.85, 30, 10, brick, 0.1);
+        for (let k = 0; k < 12; k++) { const a = (k / 12) * TAU; kb.box(kx + Math.cos(a) * kr * 0.84, kg + 30, kz + Math.sin(a) * kr * 0.84, 4, 3, 4, -a, brick2); }
+        kb.frustum(kx, kg + 30, kz, kr * 0.62, kr * 0.55, 26, 10, brick2, 0.2);
+        kb.frustum(kx, kg + 56, kz, kr * 0.7, 0, kr * 0.9, 10, red, 0.2);
+        kb.frustum(kx, kg + 56 + kr * 0.9, kz, 0.3, 0.3, 8, 4, col(0xcccccc), 0);
+        kb.box(kx + 2.2, kg + 62 + kr * 0.9, kz, 4.4, 2.6, 0.2, 0, col(0xc8201a));
+        for (let k = 0; k < 4; k++) { const a = (k / 4) * TAU + 0.8, tx = kx + Math.cos(a) * kr * 0.95, tz = kz + Math.sin(a) * kr * 0.95;
+          kb.frustum(tx, kg, tz, 6, 5.4, 44, 8, brick, 0); kb.frustum(tx, kg + 44, tz, 7.2, 0, 14, 8, red, 0); }
+        for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; kb.box(kx + Math.cos(a) * kr * 0.6, kg + 12, kz + Math.sin(a) * kr * 0.6, 2.4, 2.4, 0.4, -a, col(0xff9a30)); }
+      }
+      // spiky obsidian rocks standing in the lava
+      kit.scatter(110, 2, 60, 15, (x, z, i, r) => { const h = 2 + r() * 9, w = 1.5 + r() * 3; kb.frustum(x, gy - 1, z, w, w * 0.2, h, 5, mix(basalt, basalt2, r()), r() * 3); if (r() < 0.4) kb.blob(x, gy + 0.2, z, w * 1.8, 0.5, w * 1.8, lavaC, 0); });
+      kit.farScatter(16, 120, (x, z, r) => { const h = 25 + r() * 40, w = 14 + r() * 18; kb.frustum(x, gy - 4, z, w, w * 0.25, h, 6, basalt, r() * 3); kb.frustum(x, gy - 4 + h, z, w * 0.25, 0, 5, 6, lavaC, 0); });
+      kit.mesh(kb);
+      // ---- torches along the course
+      const tb2 = new kit.Batch(), tb3 = new kit.Batch();
+      for (let d = 18; d < L - 10; d += 38) {
+        if (inOpen(d) || (d > LF.hall[0] - 6 && d < LF.hall[1] + 6)) continue;
+        const f = kit.frame(d), s = ((d / 38) | 0) & 1 ? 1 : -1, l = s * (f.halfWidth + 1.8);
+        tb2.box(f.x + f.rx * l, f.y, f.z + f.rz * l, 0.9, 3.3, 0.9, 0, basalt2); tb2.box(f.x + f.rx * l, f.y + 3.3, f.z + f.rz * l, 1.5, 0.5, 1.5, 0, basalt);
+        tb3.blob(f.x + f.rx * l, f.y + 4.3, f.z + f.rz * l, 0.7, 1.1, 0.7, col(0xffb030), 0);
+      }
+      kit.mesh(tb2); kit.mesh(tb3, {}, true);
+      // ---- final jump: crumbled lips + ember posts
+      const jb = new kit.Batch();
+      for (const e of [LF.gap + 3, LF.gap + 13]) { const f = kit.frame(e), hd = Math.atan2(f.tx, f.tz); jb.box(f.x, f.y - 0.5, f.z, 2 * f.halfWidth + 1.6, 0.7, 1.3, hd, red);
+        for (let s = -1; s <= 1; s += 2) { const l = s * (f.halfWidth + 0.9); jb.box(f.x + f.rx * l, f.y - 0.5, f.z + f.rz * l, 1.5, 5, 1.5, hd, basalt2); jb.blob(f.x + f.rx * l, f.y + 5.4, f.z + f.rz * l, 0.9, 0.9, 0.9, col(0xff8a2a), 0); } }
+      kit.mesh(jb);
+      // fire-bar pivots
+      const pb = new kit.Batch();
+      for (const [d] of LF.bars) { const p = kit.at(d, 0, 0); pb.frustum(p[0], p[1], p[2], 1.2, 1.0, 1.5, 8, basalt2, 0); }
+      kit.mesh(pb);
+      track._lfAnim = { ground: track.ground };
+    },
+
+    hazards(track, kit) {
+      const col = kit.col, out = [];
+      const dummy = new THREE.Object3D();
+      // ---- smashers
+      const sbt = new kit.Batch(), stone = col(0x4b4854), stone2 = col(0x3a3742);
+      sbt.box(0, 0.9, 0, 8, 6.4, 8, 0, stone);
+      sbt.box(0, 7.3, 0, 8.8, 1.0, 8.8, 0, stone2);
+      sbt.box(0, 0.9, 0, 8.6, 1.0, 8.6, 0, stone2);
+      for (const [x, z] of [[-3, -3], [3, -3], [-3, 3], [3, 3], [0, 0]]) sbt.frustum(x, 0, z, 0.05, 0.9, 0.9, 5, [0.75, 0.75, 0.8], 0);
+      for (const e of [-2, 2]) { sbt.box(e, 4.5, 4.02, 1.7, 1.1, 0.3, 0, [1, 0.15, 0.08]); sbt.box(e, 5.1, 4.1, 2.2, 0.35, 0.3, 0.0, [0.1, 0.1, 0.12]); }
+      sbt.box(0, 2.6, 4.02, 4.6, 1.0, 0.3, 0, [0.08, 0.08, 0.1]);
+      for (let k = -2; k <= 2; k++) sbt.box(k * 0.9, 2.5, 4.2, 0.4, 0.8, 0.3, 0, [0.9, 0.9, 0.85]);
+      const smGeo = batchGeo(kit, sbt), smMat = kit.mat({});
+      const shGeo = kit.trackGeom(new THREE.PlaneGeometry(1, 1)); shGeo.rotateX(-Math.PI / 2);
+      const shMat = kit.trackMat(new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 }));
+      for (const [d, lat, off] of LF.smash) {
+        const p = kit.at(d, lat, 0), f = kit.frame(d), hd = Math.atan2(f.tx, f.tz);
+        const g = new THREE.Group(); g.position.set(p[0], p[1], p[2]); g.rotation.y = hd + Math.PI;
+        const blk = new THREE.Mesh(smGeo, smMat); g.add(blk);
+        const sh = new THREE.Mesh(shGeo, shMat); sh.position.y = 0.16; g.add(sh);
+        out.push({
+          x: p[0], y: p[1], z: p[2], radius: 4.4, hitKind: 'squish', vx: 0, vz: 0, active: false, object3D: g,
+          update(dt, time) {
+            let u = (time + off) % T_SMASH; if (u < 0) u += T_SMASH;
+            let lift = UP_SMASH, sc = 0.45, act = false;
+            if (u < 1.3) sc = 0.45 + 0.55 * smooth(clamp((u - 0.3) / 1.0, 0, 1));
+            else if (u < 1.5) { const q = (u - 1.3) / 0.2; lift = UP_SMASH * (1 - q * q); sc = 1; act = q > 0.75; }
+            else if (u < 2.3) { lift = 0; sc = 1; act = true; }
+            else if (u < 2.9) { const q = smooth((u - 2.3) / 0.6); lift = UP_SMASH * q; sc = 1 - q * 0.55; }
+            blk.position.y = lift; sh.scale.set(8.4 * sc, 1, 8.4 * sc); this.active = act;
+          },
+        });
+      }
+      // ---- fire bars (instanced beads)
+      const bead = kit.trackGeom(new THREE.SphereGeometry(1, 8, 6));
+      const beadMat = kit.trackMat(new THREE.MeshBasicMaterial({ color: 0xff7a1a }));
+      const nBeads = LF.bars.length * 6;
+      const beads = new THREE.InstancedMesh(bead, beadMat, nBeads); beads.frustumCulled = false; kit.add(beads);
+      const armB = new kit.Batch(); armB.box(0, 0.7, 0, 15, 0.45, 0.45, 0, [0.35, 0.33, 0.38]); armB.blob(0, 0.9, 0, 1.1, 1.1, 1.1, [0.3, 0.3, 0.34], 0);
+      const armGeo = batchGeo(kit, armB), armMat = kit.mat({});
+      let bi = 0;
+      for (const [d, ph, w] of LF.bars) {
+        const p = kit.at(d, 0, 0), arm = new THREE.Mesh(armGeo, armMat); arm.position.set(p[0], p[1] + 0.9, p[2]); kit.add(arm);
+        for (const r of [-6.6, -4.4, -2.2, 2.2, 4.4, 6.6]) {
+          const idx = bi++;
+          out.push({
+            x: p[0], y: p[1] + 1.0, z: p[2], radius: 1.35, hitKind: 'spin', vx: 0, vz: 0, active: true, object3D: null,
+            update(dt, time) {
+              const th = ph + time * w, c = Math.cos(th), s = Math.sin(th);
+              this.x = p[0] + c * r; this.z = p[2] + s * r; this.vx = -s * r * w; this.vz = c * r * w;
+              dummy.position.set(this.x, this.y, this.z); const sc = 1.15 + 0.12 * Math.sin(time * 14 + idx); dummy.scale.set(sc, sc, sc); dummy.updateMatrix();
+              beads.setMatrixAt(idx, dummy.matrix); beads.instanceMatrix.needsUpdate = true;
+              arm.rotation.y = -th;
+            },
+          });
+        }
+      }
+      // ---- lava fireballs leaping across the road
+      const fbGeo = kit.trackGeom(new THREE.SphereGeometry(1, 10, 8)), fbMat = kit.trackMat(new THREE.MeshBasicMaterial({ color: 0xff8a20 }));
+      const fbs = new THREE.InstancedMesh(fbGeo, fbMat, LF.fire.length); fbs.frustumCulled = false; kit.add(fbs);
+      LF.fire.forEach(([d, dir], idx) => {
+        const f = kit.frame(d), hw = f.halfWidth, l0 = -dir * (hw + 3.5), l1 = dir * (hw + 3.5), off = idx * 1.37, T = 3.3;
+        out.push({
+          x: f.x, y: f.y, z: f.z, radius: 1.8, hitKind: 'spin', vx: 0, vz: 0, active: false, object3D: null,
+          update(dt, time) {
+            let u = (time + off) % T; if (u < 0) u += T;
+            const q = u / 2.1; let vis = false;
+            if (q < 1) {
+              const lat = l0 + (l1 - l0) * q, h = 13 * 4 * q * (1 - q) - 2.5;
+              this.x = f.x + f.rx * lat; this.z = f.z + f.rz * lat; this.y = f.y + h;
+              this.vx = f.rx * (l1 - l0) / 2.1; this.vz = f.rz * (l1 - l0) / 2.1; vis = h > -2.2;
+              this.active = h > -0.3 && Math.abs(lat) < hw + 1.5;
+            } else this.active = false;
+            dummy.position.set(this.x, vis ? this.y : -500, this.z); const sc = vis ? 1.7 + 0.2 * Math.sin(time * 20 + idx) : 0.01; dummy.scale.set(sc, sc * 1.25, sc); dummy.updateMatrix();
+            fbs.setMatrixAt(idx, dummy.matrix); fbs.instanceMatrix.needsUpdate = true;
+          },
+        });
+      });
+      // ---- statue flame jets
+      const flGeo = kit.trackGeom((function () { const b = new kit.Batch(); b.blob(0, 0, 0, 1.6, 1.6, 2.3, [1, 0.45, 0.08], 1); b.blob(0, 0.5, 0.4, 1.1, 1.1, 1.6, [1, 0.85, 0.2], 1); return b.build(); })());
+      const flMat = kit.trackMat(new THREE.MeshBasicMaterial({ vertexColors: true }));
+      const NF = 5, fls = new THREE.InstancedMesh(flGeo, flMat, NF); fls.frustumCulled = false; kit.add(fls);
+      const sf = kit.frame(LF.statue), mouth = track._lfMouth, TF = 5.6;
+      const ml = (mouth[0] - sf.x) * sf.rx + (mouth[2] - sf.z) * sf.rz;
+      for (let j = 0; j < NF; j++) {
+        out.push({
+          x: sf.x, y: sf.y, z: sf.z, radius: 2.1, hitKind: 'spin', vx: 0, vz: 0, active: false, object3D: null,
+          update(dt, time) {
+            let u = (time + 0.0) % TF; if (u < 0) u += TF;
+            const t0 = 1.3 + j * 0.3, q = (u - t0) / 2.0; let vis = false;
+            if (q >= 0 && q <= 1) {
+              const lat = ml - (ml + 16) * q;
+              this.x = sf.x + sf.rx * lat; this.z = sf.z + sf.rz * lat; this.y = sf.y + 1.2; this.vx = -sf.rx * (ml + 16) / 2.0; this.vz = -sf.rz * (ml + 16) / 2.0;
+              this.active = q > 0.05; vis = true;
+            } else this.active = false;
+            dummy.position.set(this.x, vis ? this.y + 0.6 : -500, this.z); const sc = vis ? 1.0 + q * 0.9 : 0.01; dummy.scale.set(sc, sc, sc); dummy.rotation.y = Math.atan2(-sf.rx, -sf.rz) + Math.PI / 2 * 0; dummy.updateMatrix();
+            fls.setMatrixAt(j, dummy.matrix); fls.instanceMatrix.needsUpdate = true;
+          },
+        });
+      }
+      return out;
+    },
+
+    update(track, dt, time) {
+      const g = track.ground;
+      if (g && g.material) g.material.color.setHSL(0.045 + Math.sin(time * 0.8) * 0.006, 1, 0.5 + Math.sin(time * 1.7) * 0.04);
     },
   });
 
