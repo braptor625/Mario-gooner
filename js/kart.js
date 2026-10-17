@@ -65,7 +65,7 @@
     for (let i = 0; i < blobs.length; i++) {
       const b = blobs[i];
       g = x.createRadialGradient(px + b[0], b[1], 0, px + b[0], b[1], b[2]);
-      g.addColorStop(0, 'rgba(255,255,255,0.55)'); g.addColorStop(0.6, 'rgba(255,255,255,0.22)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+      g.addColorStop(0, 'rgba(255,255,255,0.85)'); g.addColorStop(0.6, 'rgba(255,255,255,0.4)'); g.addColorStop(1, 'rgba(255,255,255,0)');
       x.fillStyle = g; x.fillRect(px, 0, 128, 128);
     }
     atlasTex = new THREE.CanvasTexture(cv);
@@ -949,19 +949,19 @@
       for (let side = -1; side <= 1; side += 2) {
         const bx = this._wx(1.0, side * 0.75), bz = this._wz(1.0, side * 0.75);
         A.endColor(0.15, 0.35, 1);
-        A.spawn(0, 0, bx, y, bz, 0, 0.5, 0, 0.35, 0.8, 2.6, 0.7, 0.9, 1, 0.9, 0, 0);
+        A.spawn(0, 0, bx, y, bz, 0, 0.5, 0, 0.3, 0.6, 1.9, 0.4, 0.65, 1, 0.8, 0, 0);
         for (let j = 0; j < 9; j++) {
           const a = Math.random() * 6.283, sp = 5 + Math.random() * 9;
           A.endColor(0.2, 0.35, 1);
           A.spawn(0, 1, bx, y, bz, Math.cos(a) * sp - s * 6, 1 + Math.random() * 5, Math.sin(a) * sp - c * 6, 0.35 + Math.random() * 0.3, 0.14, 0.05, 0.6, 0.85, 1, 1, 12, 0.6);
         }
-        for (let j = 0; j < 3; j++) {
-          A.endColor(0.3, 0.5, 1);
-          A.spawn(1, 0, bx + (Math.random() - 0.5) * 0.8, y + Math.random() * 0.6, bz + (Math.random() - 0.5) * 0.8, 0, 1.5, 0, 0.45, 0.9, 0.2, 0.9, 0.95, 1, 1, 0, 0);
+        for (let j = 0; j < 2; j++) {
+          A.endColor(0.15, 0.35, 1);
+          A.spawn(1, 0, bx + (Math.random() - 0.5) * 0.8, y + Math.random() * 0.6, bz + (Math.random() - 0.5) * 0.8, 0, 1.5, 0, 0.4, 0.5, 0.1, 0.5, 0.75, 1, 0.9, 0, 0);
         }
       }
       A.endColor(0.2, 0.5, 1);
-      A.spawn(2, 2, this.pos.x, this.pos.y + 0.1, this.pos.z, 0, 0, 0, 0.4, 1.2, 7, 0.6, 0.85, 1, 0.8, 0, 0);
+      A.spawn(2, 2, this.pos.x, this.pos.y + 0.1, this.pos.z, 0, 0, 0, 0.4, 1.2, 6, 0.4, 0.65, 1, 0.7, 0, 0);
     }
 
     // per-frame visual effects; called once at the end of update()
@@ -989,19 +989,19 @@
           const pul = 0.85 + 0.25 * Math.sin(fr * 0.9 + side);
           A.put(0, 0, bx, by, bz, (blue ? 1.15 : 0.9) * pul, r, g, b, 0.55, 0, 0, 0, 0);
           A.put(0, 0, bx, by, bz, 0.42 * pul, 1, 1, 1, 0.9, 0, 0, 0, 0);
-          for (let j = 0; j < 2; j++) {
-            const sp = 3 + rnd() * 7, a = (rnd() - 0.5) * 2.2;
+          for (let j = 0; j < 3; j++) {
+            const sp = 3 + rnd() * 8, a = (rnd() - 0.5) * 2.2;
             // sparks fly out backward and to the outside of the drift
             const vx = -sn * sp * 0.7 - cs * side * sp * 0.7 * Math.cos(a) + cs * (rnd() - 0.5) * 2;
             const vz = -cs * sp * 0.7 + sn * side * sp * 0.7 * Math.cos(a) - sn * (rnd() - 0.5) * 2;
             A.endColor(er, eg, eb);
-            A.spawn(0, 1, bx, by, bz, vx, 2 + rnd() * 4, vz, 0.22 + rnd() * 0.25, 0.13, 0.05, r, g, b, 1, 16, 0.4);
+            A.spawn(0, 1, bx, by, bz, vx, 2 + rnd() * 4, vz, 0.22 + rnd() * 0.28, 0.085, 0.03, blue ? 0.75 : 1, blue ? 0.9 : 0.95, blue ? 1 : 0.6, 1, 16, 0.4);
           }
         }
         if ((fr & 1) === 0) {
           const side = (fr & 2) ? 0.78 : -0.78;
           A.endColor(er, eg, eb);
-          A.spawn(1, 0, this._wx(1.05, side), py + 0.3, this._wz(1.05, side), (rnd() - 0.5) * 2, 1.5 + rnd() * 2, (rnd() - 0.5) * 2, 0.35, 0.55, 0.12, 1, 1, 1, 0.95, 4, 0.5);
+          A.spawn(1, 0, this._wx(1.05, side), py + 0.3, this._wz(1.05, side), (rnd() - 0.5) * 2, 1.5 + rnd() * 2, (rnd() - 0.5) * 2, 0.3, 0.32, 0.08, blue ? 0.7 : 1, blue ? 0.85 : 0.9, blue ? 1 : 0.5, 0.95, 4, 0.5);
         }
       }
       // ---- drift smoke / tire smoke
@@ -1009,28 +1009,28 @@
         const side = (fr & 3) ? 0.75 : -0.75;
         const grey = burn ? 0.8 : 0.9;
         S.endColor(grey * 0.85, grey * 0.85, grey * 0.9);
-        S.spawn(3, 0, this._wx(1.0, side), py + 0.15, this._wz(1.0, side), -sn * 1.5 + (rnd() - 0.5), 0.9 + rnd() * 0.7, -cs * 1.5 + (rnd() - 0.5), burn ? 0.8 : 0.55, 0.5, burn ? 2.2 : 1.6, grey, grey, grey, burn ? 0.5 : 0.3, -0.4, 1.2);
+        S.spawn(3, 0, this._wx(1.0, side), py + 0.15, this._wz(1.0, side), -sn * 1.5 + (rnd() - 0.5), 0.9 + rnd() * 0.7, -cs * 1.5 + (rnd() - 0.5), burn ? 0.9 : 0.65, 0.6, burn ? 2.6 : 2.0, grey, grey, grey, burn ? 0.8 : 0.55, -0.4, 1.2);
       }
       // ---- surface puffs
       const sf = this.trackInfo.surface;
-      if (!this.airborne && !this.falling && !this.cannonFlight && spd01 > 0.2 && (fr & 1) === 0 && (SURF_MUL[sf] || (!this.trackInfo.onRoad && sf === 'offroad'))) {
-        const side = (fr & 2) ? 0.75 : -0.75;
+      if (!this.airborne && !this.falling && !this.cannonFlight && spd01 > 0.2 && (SURF_MUL[sf] || (!this.trackInfo.onRoad && sf === 'offroad'))) {
+        const side = (fr & 1) ? 0.75 : -0.75;
         const bx = this._wx(0.9, side), bz = this._wz(0.9, side), by = py + 0.12;
         const k = 0.6 + spd01 * 0.6;
         if (sf === 'water') {
           S.endColor(0.8, 0.92, 1);
-          S.spawn(3, 0, bx, by, bz, (rnd() - 0.5) * 3, 2.5 + rnd() * 2, (rnd() - 0.5) * 3, 0.55, 0.5, 1.5, 0.75, 0.9, 1, 0.55, 9, 1);
+          S.spawn(3, 0, bx, by, bz, (rnd() - 0.5) * 3, 2.5 + rnd() * 2, (rnd() - 0.5) * 3, 0.6, 0.6, 1.8, 0.75, 0.9, 1, 0.8, 9, 1);
           for (let j = 0; j < 3; j++) A.spawn(0, 1, bx, by, bz, (rnd() - 0.5) * 7, 4 + rnd() * 4, (rnd() - 0.5) * 7, 0.5, 0.12, 0.05, 0.8, 0.95, 1, 0.9, 22, 0.2);
         } else if (sf === 'mud') {
           S.endColor(0.28, 0.17, 0.08);
-          S.spawn(3, 0, bx, by, bz, (rnd() - 0.5) * 3, 2.2 + rnd() * 2, (rnd() - 0.5) * 3, 0.55, 0.45 * k, 1.1 * k, 0.42, 0.26, 0.12, 0.7, 11, 0.8);
+          S.spawn(3, 0, bx, by, bz, (rnd() - 0.5) * 3, 2.2 + rnd() * 2, (rnd() - 0.5) * 3, 0.65, 0.8 * k, 2.0 * k, 0.42, 0.26, 0.12, 0.9, 11, 0.8);
           S.spawn(0, 0, bx, by, bz, (rnd() - 0.5) * 6, 3 + rnd() * 3, (rnd() - 0.5) * 6, 0.5, 0.2, 0.15, 0.26, 0.15, 0.07, 0.95, 24, 0.1);
         } else if (sf === 'sand') {
           S.endColor(0.85, 0.75, 0.5);
-          S.spawn(3, 0, bx, by, bz, (rnd() - 0.5) * 1.5 - sn * 1.5, 0.9 + rnd() * 0.8, (rnd() - 0.5) * 1.5 - cs * 1.5, 0.7, 0.6 * k, 2.0 * k, 0.9, 0.78, 0.5, 0.55, -0.3, 1.2);
+          S.spawn(3, 0, bx, by, bz, (rnd() - 0.5) * 1.5 - sn * 1.5, 0.9 + rnd() * 0.8, (rnd() - 0.5) * 1.5 - cs * 1.5, 0.85, 1.0 * k, 3.4 * k, 0.92, 0.8, 0.52, 0.8, -0.3, 1.2);
         } else {
-          S.endColor(0.5, 0.42, 0.28);
-          S.spawn(3, 0, bx, by, bz, (rnd() - 0.5) * 1.5 - sn * 1.5, 0.9 + rnd() * 0.8, (rnd() - 0.5) * 1.5 - cs * 1.5, 0.65, 0.5 * k, 1.8 * k, 0.55, 0.44, 0.28, 0.5, -0.3, 1.2);
+          S.endColor(0.62, 0.55, 0.38);
+          S.spawn(3, 0, bx, by, bz, (rnd() - 0.5) * 1.5 - sn * 1.5, 0.9 + rnd() * 0.8, (rnd() - 0.5) * 1.5 - cs * 1.5, 0.8, 0.9 * k, 3.2 * k, 0.6, 0.52, 0.34, 0.8, -0.3, 1.2);
         }
       }
       // faint exhaust puffs at speed
@@ -1045,7 +1045,7 @@
           this._exWorld(e, w);
           const fl = 0.85 + 0.3 * Math.sin(fr * 2.1 + e * 2.7) + (rnd() - 0.5) * 0.25;
           const ex = w[0], ey = w[1], ez = w[2];
-          A.put(0, 0, ex - sn * 0.15, ey, ez - cs * 0.15, 1.5 * fl * fade, 1, 0.38, 0.05, 0.5, 0, 0, 0, 0);
+          A.put(0, 0, ex - sn * 0.15, ey, ez - cs * 0.15, 1.9 * fl * fade, 1, 0.38, 0.05, 0.5, 0, 0, 0, 0);
           A.put(0, 0, ex - sn * 0.5, ey, ez - cs * 0.5, 1.0 * fl * fade, 1, 0.65, 0.12, 0.8, 0, 0, 0, 0);
           A.put(0, 0, ex - sn * 0.85, ey, ez - cs * 0.85, 0.65 * fl * fade, 1, 0.85, 0.3, 0.75, 0, 0, 0, 0);
           A.put(0, 0, ex - sn * 0.2, ey, ez - cs * 0.2, 0.55 * fl * fade, 0.7, 0.85, 1, 0.95, 0, 0, 0, 0);
@@ -1068,18 +1068,21 @@
         hsv(hue, 0.65, 1);
         A.put(0, 0, this.pos.x, py + 0.7, this.pos.z, 3.4 * this._scale * (0.92 + 0.12 * Math.sin(fr * 0.7)), RGB[0], RGB[1], RGB[2], 0.28, 0, 0, 0, 0);
         for (let j = 0; j < 2; j++) {
-          hsv(rnd(), 0.8, 1);
+          const h0 = rnd();
+          hsv(h0, 0.85, 1);
+          const sr = RGB[0], sg = RGB[1], sb = RGB[2];
+          hsv((h0 + 0.3) % 1, 0.85, 1);
           const a = rnd() * 6.283, rr = 0.6 + rnd() * 0.9;
           A.endColor(RGB[0], RGB[1], RGB[2]);
           A.spawn(1, 0, this.pos.x + Math.cos(a) * rr - sn * (0.6 + rnd() * 1.4), py + 0.2 + rnd() * 1.1, this.pos.z + Math.sin(a) * rr - cs * (0.6 + rnd() * 1.4),
-            (rnd() - 0.5) * 1.5, 0.8 + rnd() * 1.4, (rnd() - 0.5) * 1.5, 0.45 + rnd() * 0.4, 0.75, 0.1, 1, 1, 1, 1, -1, 0.5);
+            (rnd() - 0.5) * 1.5, 0.8 + rnd() * 1.4, (rnd() - 0.5) * 1.5, 0.45 + rnd() * 0.4, 0.42, 0.08, sr, sg, sb, 0.95, -1, 0.5);
         }
       }
       // ---- slipstream wind lines
-      if (this.drafting01 > 0.05 && (fr % 2) === 0) {
+      if (this.drafting01 > 0.05) {
         const sd = (rnd() < 0.5 ? -1 : 1) * (0.8 + rnd() * 0.9), ah = 1.5 + rnd() * 2.5;
         const u = this.drafting01;
-        A.spawn(0, 1, this._wx(-ah, sd), py + 0.25 + rnd() * 0.9, this._wz(-ah, sd), -sn * 26, 0, -cs * 26, 0.3, 0.05, 0.03, 0.8, 0.92, 1, 0.45 + 0.4 * u, 0, 0);
+        A.spawn(0, 1, this._wx(-ah, sd), py + 0.25 + rnd() * 0.9, this._wz(-ah, sd), -sn * 30, 0, -cs * 30, 0.32, 0.09, 0.04, 0.85, 0.95, 1, 0.55 + 0.4 * u, 0, 0);
       }
     }
 

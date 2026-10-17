@@ -201,7 +201,7 @@
     '  float fres = pow(1.0 - nv, 2.2);',
     '  float h = fract(dot(vL, vec3(0.30, 0.52, 0.27)) + uTime * 0.16 + (1.0 - nv) * 0.8 + vI.x * 0.13);',
     '  vec3 rb = 0.55 + 0.45 * cos(6.28318 * (h + vec3(0.0, 0.33, 0.67)));',
-    '  if (vI.y > 0.5) rb = mix(rb, vec3(1.0, 0.78, 0.2), 0.5 + 0.12 * sin(uTime * 4.0));',
+    '  if (vI.y > 0.5) rb = mix(rb, vec3(1.0, 0.72, 0.15), 0.38 + 0.1 * sin(uTime * 4.0));',
     '  if (uMode > 0.5) rb = mix(vec3(0.85, 0.05, 0.16), vec3(1.0, 0.5, 0.06), h);',
     '  vec3 a = abs(vL);',
     '  float e = max(max(min(a.x, a.y), min(a.y, a.z)), min(a.x, a.z));',
@@ -267,7 +267,7 @@
     }
     _geo(g) { return this._track(g); }
 
-    _qTexture(flip, bg) {
+    _qTexture(flip, bg, bright) {
       const c = document.createElement('canvas');
       c.width = 128; c.height = 128;
       const x = c.getContext('2d');
@@ -278,10 +278,10 @@
       x.font = '900 100px "Arial Black", Arial, sans-serif';
       x.textAlign = 'center'; x.textBaseline = 'middle';
       x.lineJoin = 'round';
-      x.lineWidth = 12; x.strokeStyle = 'rgba(40,10,50,0.9)';
+      x.lineWidth = 12; x.strokeStyle = bright ? 'rgba(40,70,200,0.95)' : 'rgba(40,10,50,0.9)';
       x.strokeText('?', 64, 70);
       const g = x.createLinearGradient(0, 20, 0, 110);
-      g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#ffe27a');
+      if (bright) { g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#bfe6ff'); } else { g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#ffe27a'); }
       x.fillStyle = g;
       x.fillText('?', 64, 70);
       x.restore();
@@ -544,7 +544,7 @@
       const N = n + TEMP_BOXES;
       this.nBoxes = N;
       const mapB = this._qTexture(true, null);
-      const mapA = this._qTexture(false, null);
+      const mapA = this._qTexture(false, null, true);
       this.fakeMat = this._boxMat(true, mapB);
       this._fakeGeo = this._boxGeo(0, false);
       this.boxMat = this._boxMat(false, mapB);
@@ -581,8 +581,8 @@
       // inner rotating "?" : a thin stack of alpha-tested slices (reads as a slab), one draw call
       const slices = [];
       const pg = new THREE.PlaneGeometry(0.9, 0.9);
-      for (let s = 0; s < 5; s++) {
-        const z = (s - 2) * 0.035, sh = s === 2 ? 1 : (s === 0 || s === 4) ? 0.5 : 0.75;
+      for (let s = 0; s < 7; s++) {
+        const z = (s - 3) * 0.011, sh = s === 3 ? 1 : (s === 0 || s === 6) ? 0.78 : 0.9;
         slices.push({ g: pg, c: new THREE.Color(sh, sh, sh).getHex(), z: z });
       }
       const qg = this._merge(slices);
@@ -696,30 +696,37 @@
       const hub = this.hub;
       if (!hub) return;
       const A = hub.add, S = hub.alpha, rnd = Math.random, k = r / 7;
-      y += 0.8;
-      A.spawn(0, 0, x, y, z, 0, 0, 0, 0.22, r * 0.7, r * 1.9, 1, 0.95, 0.8, 1, 0, 0);
-      for (let j = 0; j < 18; j++) {
-        const a = rnd() * 6.283, b = rnd() * 1.4, sp = r * (1.0 + rnd() * 2.2);
-        A.endColor(0.85, 0.1, 0.02);
-        A.spawn(0, 0, x, y, z, Math.cos(a) * Math.cos(b) * sp, Math.sin(b) * sp * 0.9 + r * 0.6, Math.sin(a) * Math.cos(b) * sp, 0.5 + rnd() * 0.4, r * 0.4, r * 1.05, 1, 0.82, 0.3, 0.95, -2.5, 2.6);
-      }
-      for (let j = 0; j < 26; j++) {
-        const a = rnd() * 6.283, b = rnd() * 1.5, sp = (13 + rnd() * 18) * (0.6 + k * 0.4);
-        A.endColor(1, 0.3, 0.05);
-        A.spawn(0, 1, x, y, z, Math.cos(a) * Math.cos(b) * sp, Math.sin(b) * sp + 4, Math.sin(a) * Math.cos(b) * sp, 0.45 + rnd() * 0.5, 0.17, 0.07, 1, 0.85, 0.35, 1, 26, 0.5);
+      y += 0.4;
+      const cy = y + r * 0.3;
+      A.spawn(0, 0, x, cy, z, 0, 0, 0, 0.16, r * 0.45, r * 1.3, 1, 0.9, 0.6, 0.8, 0, 0);
+      for (let j = 0; j < 14; j++) {
+        const a = rnd() * 6.283, b = rnd() * 1.3, sp = r * (0.7 + rnd() * 1.5);
+        S.endColor(0.6, 0.22, 0.07);
+        S.spawn(3, 0, x + Math.cos(a) * r * 0.1, cy, z + Math.sin(a) * r * 0.1, Math.cos(a) * Math.cos(b) * sp, Math.sin(b) * sp * 0.8 + r * 0.6, Math.sin(a) * Math.cos(b) * sp, 0.55 + rnd() * 0.5, r * 0.5, r * 1.15, 1, 0.68, 0.18, 0.95, -1.5, 2.6);
       }
       for (let j = 0; j < 6; j++) {
-        const a = rnd() * 6.283, sp = 6 + rnd() * 6;
-        A.spawn(1, 0, x, y, z, Math.cos(a) * sp, 3 + rnd() * 6, Math.sin(a) * sp, 0.5, 1.2, 0.2, 1, 0.95, 0.7, 1, 10, 1.5);
+        const a = rnd() * 6.283, sp = r * (0.3 + rnd() * 0.9);
+        A.endColor(1, 0.3, 0.05);
+        A.spawn(0, 0, x + Math.cos(a) * r * 0.2, cy + rnd() * r * 0.4, z + Math.sin(a) * r * 0.2, Math.cos(a) * sp, r * 0.5, Math.sin(a) * sp, 0.4, r * 0.4, r * 0.9, 1, 0.8, 0.3, 0.55, -1, 2.5);
+      }
+      for (let j = 0; j < 28; j++) {
+        const a = rnd() * 6.283, b = rnd() * 1.5, sp = (13 + rnd() * 18) * (0.6 + k * 0.4);
+        A.endColor(1, 0.3, 0.05);
+        A.spawn(0, 1, x, cy, z, Math.cos(a) * Math.cos(b) * sp, Math.sin(b) * sp + 4, Math.sin(a) * Math.cos(b) * sp, 0.45 + rnd() * 0.5, 0.15, 0.06, 1, 0.85, 0.4, 1, 26, 0.5);
+      }
+      for (let j = 0; j < 5; j++) {
+        const a = rnd() * 6.283, sp = 5 + rnd() * 6;
+        A.endColor(1, 0.6, 0.2);
+        A.spawn(1, 0, x, cy, z, Math.cos(a) * sp, 3 + rnd() * 6, Math.sin(a) * sp, 0.5, 0.9, 0.15, 1, 0.9, 0.6, 1, 10, 1.5);
       }
       A.endColor(1, 0.35, 0.08);
-      A.spawn(2, 2, x, y - 0.6, z, 0, 0, 0, 0.55, r * 0.5, r * 3.4, 1, 0.9, 0.6, 0.95, 0, 0);
+      A.spawn(2, 2, x, y - 0.2, z, 0, 0, 0, 0.55, r * 0.5, r * 3.2, 1, 0.8, 0.45, 0.9, 0, 0);
       A.endColor(0.6, 0.8, 1);
-      A.spawn(2, 0, x, y, z, 0, 0, 0, 0.35, r * 0.4, r * 2.2, 1, 1, 1, 0.7, 0, 0);
+      A.spawn(2, 0, x, cy, z, 0, 0, 0, 0.3, r * 0.4, r * 2.0, 1, 0.95, 0.8, 0.6, 0, 0);
       for (let j = 0; j < 12; j++) {
         const a = rnd() * 6.283, sp = r * (0.3 + rnd() * 0.8);
         S.endColor(0.5, 0.47, 0.45);
-        S.spawn(3, 0, x + Math.cos(a) * r * 0.2, y, z + Math.sin(a) * r * 0.2, Math.cos(a) * sp, 2 + rnd() * 4, Math.sin(a) * sp, 1.1 + rnd() * 0.7, r * 0.4, r * 1.5, 0.16, 0.14, 0.13, 0.6, -0.6, 1.4);
+        S.spawn(3, 0, x + Math.cos(a) * r * 0.2, cy, z + Math.sin(a) * r * 0.2, Math.cos(a) * sp, 2 + rnd() * 4, Math.sin(a) * sp, 1.1 + rnd() * 0.7, r * 0.4, r * 1.4, 0.16, 0.14, 0.13, 0.6, -0.6, 1.4);
       }
     }
 
@@ -735,13 +742,13 @@
       else if (src === 'shell_red' || src === 'fireball') { r = 1; g = 0.6; b = 0.3; er = 1; eg = 0.15; eb = 0.05; }
       else if (src === 'egg') { r = 1; g = 0.7; b = 0.9; er = 0.5; eg = 0.8; eb = 1; }
       else if (src === 'chomp') { r = 1; g = 1; b = 1; er = 0.6; eg = 0.4; eb = 1; }
-      A.spawn(0, 0, x, y, z, 0, 0, 0, 0.28, 1.6, 4.4, 1, 1, 0.9, 0.9, 0, 0);
+      A.spawn(0, 0, x, y, z, 0, 0, 0, 0.28, 2.2, 5.5, 1, 1, 0.9, 0.9, 0, 0);
       A.endColor(er, eg, eb);
-      A.spawn(2, 0, x, y, z, 0, 0, 0, 0.35, 0.8, 5.2, r, g, b, 0.85, 0, 0);
+      A.spawn(2, 0, x, y, z, 0, 0, 0, 0.35, 1.0, 6.5, r, g, b, 0.9, 0, 0);
       for (let j = 0; j < 8; j++) {
         const a = (j / 8) * 6.283 + rnd() * 0.5, sp = 5 + rnd() * 5;
         A.endColor(er, eg, eb);
-        A.spawn(1, 0, x, y, z, Math.cos(a) * sp, 2 + rnd() * 5, Math.sin(a) * sp, 0.5 + rnd() * 0.2, 1.4, 0.3, r, g, b, 1, 8, 2);
+        A.spawn(1, 0, x, y, z, Math.cos(a) * sp, 2 + rnd() * 5, Math.sin(a) * sp, 0.55 + rnd() * 0.25, 1.9, 0.4, r, g, b, 1, 8, 2);
       }
       for (let j = 0; j < 10; j++) {
         const a = rnd() * 6.283, sp = 8 + rnd() * 10;
@@ -791,8 +798,8 @@
         for (let j = 0; j < BOLT_N; j++) {
           const x0 = p[j * 3], y0 = p[j * 3 + 1], z0 = p[j * 3 + 2], x1 = p[j * 3 + 3], y1 = p[j * 3 + 4], z1 = p[j * 3 + 5];
           const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0, L = Math.hypot(dx, dy, dz), s = L / 0.045 / L;
-          A.put(0, 1, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, 0.22, 1, 1, 0.9, fl, dx * s, dy * s, dz * s, 0);
-          A.put(0, 1, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, 1.3, 0.45, 0.6, 1, 0.5 * fl, dx * s, dy * s, dz * s, 0);
+          A.put(0, 1, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, 0.5, 1, 1, 0.9, fl, dx * s, dy * s, dz * s, 0);
+          A.put(0, 1, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, 2.6, 0.45, 0.6, 1, 0.55 * fl, dx * s, dy * s, dz * s, 0);
         }
       }
     }
@@ -829,7 +836,7 @@
           if (held) { A.put(0, 0, x, y + 0.5, z, 1.5, 1, 0.2, 0.1, 0.18, 0, 0, 0, 0); break; }
           A.put(0, 0, x, y + 0.5, z, 2.3, 1, 0.2, 0.1, 0.4, 0, 0, 0, 0);
           A.endColor(1, 0.1, 0.05);
-          A.spawn(0, 0, x + (rnd() - 0.5) * 0.3, y + 0.45, z + (rnd() - 0.5) * 0.3, (rnd() - 0.5), 0.2, (rnd() - 0.5), 0.45, 0.8, 0.12, 1, 0.55, 0.35, 0.75, 0, 1.5);
+          A.spawn(0, 0, x + (rnd() - 0.5) * 0.3, y + 0.45, z + (rnd() - 0.5) * 0.3, (rnd() - 0.5), 0.2, (rnd() - 0.5), 0.5, 1.1, 0.15, 1, 0.45, 0.3, 0.85, 0, 1.5);
           if ((tick & 1) === 0) A.spawn(1, 0, x, y + 0.5, z, (rnd() - 0.5) * 2, 0.5 + rnd(), (rnd() - 0.5) * 2, 0.4, 0.5, 0.1, 1, 0.8, 0.7, 0.9, 0, 1);
           break;
         case 'shell_green':
@@ -1168,8 +1175,10 @@
       const A = this.A;
       st.orbG = []; st.orbR = []; st.heartM = [];
       for (let i = 0; i < 3; i++) {
-        st.orbG.push(this._shellMesh('green', 0.7));
-        st.orbR.push(this._shellMesh('red', 0.7));
+        const mg = this._shellMesh('green', 0.7), mr = this._shellMesh('red', 0.7);
+        mg.visible = mr.visible = false;
+        this._root.add(mg); this._root.add(mr);
+        st.orbG.push(mg); st.orbR.push(mr);
       }
       for (let i = 0; i < 2; i++) {
         const m = new THREE.Mesh(A.g.heart, A.pink);

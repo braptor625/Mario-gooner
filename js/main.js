@@ -287,8 +287,8 @@
     const cfg = track.cfg;
     if (cfg && cfg.sky) G.GFX.setEnvFromTheme(cfg.sky[0], cfg.sky[1], cfg.ground !== undefined ? cfg.ground : cfg.sky[2]);
     const night = track.theme === 'starlight' || (cfg && cfg.bg !== undefined && new THREE.Color(cfg.bg).getHSL({}).l < 0.2);
-    G.GFX.bloomStrength = night ? 0.85 : 0.5;
-    G.GFX.bloomThreshold = night ? 0.6 : 0.74;
+    G.GFX.bloomStrength = night ? 0.62 : 0.5;
+    G.GFX.bloomThreshold = night ? 0.7 : 0.74;
     const sun = track.sun;
     if (sun) {
       sun.castShadow = !!Game.shadows;
