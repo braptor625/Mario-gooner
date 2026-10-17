@@ -1793,43 +1793,72 @@
   }
 
   // ---------------------------------------------------------------- trophy
-  const trophyMats = {};
+  const trophyMats = {}, trophyGeos = {};
+  function glossy(opts, mult) {
+    const m = G.GFX && G.GFX.shiny ? G.GFX.shiny(opts) : new THREE.MeshPhongMaterial(Object.assign({}, opts, { reflectivity: undefined }));
+    if (G.GFX && G.GFX.envMap && !m.envMap) m.envMap = G.GFX.envMap;
+    if (mult && m.envMap) { m.combine = THREE.MultiplyOperation; m.needsUpdate = true; }
+    return m;
+  }
   function trophyMat(kind) {
     if (trophyMats[kind]) return trophyMats[kind];
     const def = {
-      gold: { color: 0xd9a21a, specular: 0xfff1a0, emissive: 0x2a1800, shininess: 120 },
-      silver: { color: 0xd4dae2, specular: 0xffffff, emissive: 0x20242a, shininess: 140 },
-      bronze: { color: 0xc27a3a, specular: 0xffc890, emissive: 0x2a1204, shininess: 90 },
-    }[kind] || null;
-    const d = def || { color: 0xffc21a, specular: 0xfff1a0, emissive: 0x3a2400, shininess: 120 };
+      gold: { color: 0xf2b21c, specular: 0xfff0b0, emissive: 0x3a2400, label: '1ST' },
+      silver: { color: 0xdfe5ee, specular: 0xffffff, emissive: 0x20262e, label: '2ND' },
+      bronze: { color: 0xd8823c, specular: 0xffcf9a, emissive: 0x3a1a06, label: '3RD' },
+    }[kind] || { color: 0xf2b21c, specular: 0xfff0b0, emissive: 0x3a2400, label: '1ST' };
+    // engraved plate texture
+    let plate = null;
+    try {
+      const c = cvs(128, 48), x = c.getContext('2d');
+      const g = x.createLinearGradient(0, 0, 0, 48);
+      const hex = '#' + new THREE.Color(def.color).getHexString();
+      g.addColorStop(0, '#fff6d8'); g.addColorStop(0.5, hex); g.addColorStop(1, '#' + shade(def.color, 0.6).getHexString());
+      x.fillStyle = g; x.fillRect(0, 0, 128, 48);
+      x.strokeStyle = 'rgba(60,30,0,0.7)'; x.lineWidth = 2; x.strokeRect(3, 3, 122, 42);
+      x.fillStyle = '#3a2200'; x.font = 'bold 30px Arial Black, Impact, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.fillText(def.label, 64, 26);
+      x.fillStyle = 'rgba(255,255,255,0.7)'; x.fillText(def.label, 63, 25);
+      plate = mkTex(c);
+    } catch (e) { plate = null; }
+    const gemCol = kind === 'silver' ? 0x4ac8ff : kind === 'bronze' ? 0xff7a3a : 0xff2a52;
     return (trophyMats[kind] = {
-      metal: new THREE.MeshPhongMaterial({ color: d.color, specular: d.specular, emissive: d.emissive, shininess: d.shininess }),
-      base: new THREE.MeshPhongMaterial({ color: 0x2a2230, specular: 0x665577, shininess: 60 }),
-      gem: new THREE.MeshPhongMaterial({ color: kind === 'silver' ? 0x6ad0ff : kind === 'bronze' ? 0xff7a3a : 0xff3a5a, specular: 0xffffff, emissive: 0x220808, shininess: 160, flatShading: true }),
+      metal: glossy({ color: def.color, specular: def.specular, emissive: def.emissive, shininess: 150, reflectivity: 0.85, side: THREE.DoubleSide }, true),
+      base: glossy({ color: 0x2c2434, specular: 0x9a88b0, shininess: 120, reflectivity: 0.5 }, true),
+      gem: glossy({ color: gemCol, specular: 0xffffff, emissive: shade(gemCol, 0.45).getHex(), shininess: 200, reflectivity: 0.35 }, true),
+      plate: new THREE.MeshPhongMaterial({ color: 0xffffff, map: plate, specular: 0xffe8a0, shininess: 90 }),
     });
   }
   function buildTrophy(kind) {
     const m = trophyMat(kind);
     const g = new THREE.Group();
     g.name = 'trophy_' + kind;
-    const add = (geo, mt, x, y, z) => { const o = new THREE.Mesh(geo, mt); o.position.set(x, y, z); g.add(o); return o; };
-    add(new THREE.BoxGeometry(0.62, 0.12, 0.62), m.base, 0, 0.06, 0);
-    add(new THREE.BoxGeometry(0.48, 0.1, 0.48), m.base, 0, 0.17, 0);
-    add(new THREE.CylinderGeometry(0.2, 0.26, 0.1, 20), m.metal, 0, 0.27, 0);
-    add(new THREE.CylinderGeometry(0.07, 0.11, 0.3, 14), m.metal, 0, 0.47, 0);
-    add(new THREE.SphereGeometry(0.12, 14, 10), m.metal, 0, 0.64, 0);
-    // chunky cup (lathe profile, bottom -> rim)
-    const prof = [[0.001, 0.0], [0.12, 0.02], [0.2, 0.1], [0.3, 0.26], [0.36, 0.42], [0.38, 0.5], [0.34, 0.5], [0.3, 0.42], [0.2, 0.2], [0.001, 0.08]]
-      .map((p) => new THREE.Vector2(p[0], p[1]));
-    const cup = add(new THREE.LatheGeometry(prof, 24), m.metal, 0, 0.68, 0);
-    cup.material = m.metal; m.metal.side = THREE.DoubleSide;
-    add(new THREE.TorusGeometry(0.37, 0.03, 8, 24), m.metal, 0, 1.18, 0).rotation.x = HP;
+    const add = (geo, mt, x, y, z) => { const o = new THREE.Mesh(geo, mt); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
+    if (!trophyGeos.body) {
+      // body of revolution: foot, stem, knob and bell, one smooth profile
+      const pts = [[0.001, 0.0], [0.27, 0.0], [0.3, 0.03], [0.27, 0.08], [0.2, 0.13], [0.11, 0.2], [0.075, 0.3], [0.085, 0.4], [0.14, 0.46], [0.15, 0.5], [0.11, 0.55], [0.1, 0.6],
+        [0.2, 0.68], [0.32, 0.8], [0.4, 0.96], [0.43, 1.1], [0.42, 1.18], [0.4, 1.2], [0.37, 1.18], [0.36, 1.1], [0.32, 0.96], [0.22, 0.82], [0.09, 0.72], [0.001, 0.7]]
+        .map((q) => new THREE.Vector2(q[0], q[1]));
+      const curve = new THREE.SplineCurve(pts);
+      trophyGeos.body = new THREE.LatheGeometry(curve.getPoints(44).map((v) => new THREE.Vector2(Math.max(0.001, v.x), v.y)), 32);
+      trophyGeos.base = new THREE.CylinderGeometry(0.44, 0.5, 0.14, 40);
+      trophyGeos.base2 = new THREE.CylinderGeometry(0.36, 0.42, 0.1, 40);
+      trophyGeos.handle = new THREE.TorusGeometry(0.17, 0.05, 14, 28);
+      trophyGeos.gem = new THREE.IcosahedronGeometry(0.11, 2);
+      trophyGeos.rim = new THREE.TorusGeometry(0.41, 0.028, 12, 48);
+      trophyGeos.plate = new THREE.PlaneGeometry(0.34, 0.125);
+    }
+    add(trophyGeos.base, m.base, 0, 0.07, 0);
+    add(trophyGeos.base2, m.base, 0, 0.19, 0);
+    const pl = add(trophyGeos.plate, m.plate, 0, 0.07, 0.49); pl.rotation.x = -0.12; pl.castShadow = false;
+    add(trophyGeos.body, m.metal, 0, 0.24, 0);
+    add(trophyGeos.rim, m.metal, 0, 1.43, 0).rotation.x = HP;
     for (const sd of [-1, 1]) {
-      const h = add(new THREE.TorusGeometry(0.17, 0.05, 8, 16), m.metal, sd * 0.42, 0.98, 0);
+      const h = add(trophyGeos.handle, m.metal, sd * 0.42, 1.0, 0);
       h.scale.set(0.8, 1.2, 1);
     }
-    add(new THREE.SphereGeometry(0.1, 8, 6), m.gem, 0, 0.92, 0.35).scale.set(1, 1.2, 0.5);
-    return g;
+    add(trophyGeos.gem, m.gem, 0, 1.02, 0.4).scale.set(1, 1.25, 0.55);
+        return g;
   }
 
   function kartsFor(frontId, rearId) {
