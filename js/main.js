@@ -31,7 +31,10 @@
 
   // ---------------------------------------------------------------- renderer
   const canvas = document.getElementById('game');
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  // AA comes from the multisampled scene target in js/gfx.js; the plain path (low quality) goes without
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: !G.GFX, powerPreference: 'high-performance' });
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.info.autoReset = false; // count every pass of a frame (scene views + post)
   const maxRatio = () => Math.min(window.devicePixelRatio || 1, 1.5);
   let pixelRatio = maxRatio();
   renderer.setPixelRatio(pixelRatio);
@@ -278,6 +281,44 @@
     scene.background = null;
   }
 
+  // per-course reflections, bloom and sun shadows
+  function applyTrackLook(track) {
+    if (!G.GFX) return;
+    const cfg = track.cfg;
+    if (cfg && cfg.sky) G.GFX.setEnvFromTheme(cfg.sky[0], cfg.sky[1], cfg.ground !== undefined ? cfg.ground : cfg.sky[2]);
+    const night = track.theme === 'starlight' || (cfg && cfg.bg !== undefined && new THREE.Color(cfg.bg).getHSL({}).l < 0.2);
+    G.GFX.bloomStrength = night ? 0.85 : 0.5;
+    G.GFX.bloomThreshold = night ? 0.6 : 0.74;
+    const sun = track.sun;
+    if (sun) {
+      sun.castShadow = !!Game.shadows;
+      if (Game.shadows) {
+        sun.shadow.mapSize.set(2048, 2048);
+        const sc = sun.shadow.camera;
+        sc.left = -60; sc.right = 60; sc.top = 60; sc.bottom = -60; sc.near = 1; sc.far = 500;
+        sc.updateProjectionMatrix();
+        sun.shadow.bias = -0.0006;
+        sun.shadow.normalBias = 0.02;
+      }
+      if (G.GFX.setSun) G.GFX.setSun(sun.position.clone().sub(sun.target.position), sun.color.getHex());
+    }
+  }
+  // keep the shadow frustum centred on the action (sun and target live under the track root)
+  const _sunOff = new THREE.Vector3();
+  function updateSun() {
+    const sun = Game.track && Game.track.sun;
+    if (!sun || !sun.castShadow) return;
+    const t = Game.player || sorted[0] || Game.karts[0];
+    if (!t) return;
+    if (!sun.userData.offset) sun.userData.offset = sun.position.clone().sub(sun.target.position);
+    const root = sun.parent;
+    _sunOff.copy(t.pos);
+    if (root) root.worldToLocal(_sunOff);
+    sun.target.position.copy(_sunOff);
+    sun.position.copy(_sunOff).add(sun.userData.offset);
+    sun.target.updateMatrixWorld();
+  }
+
   function makeKart(e, i, track, cc, grid) {
     const kart = new G.Kart({ scene, track, kartId: e.kart, frontId: e.front, rearId: e.rear, isPlayer: !!e.human, index: i, cc });
     const g = grid[i];
@@ -290,6 +331,7 @@
     kart.lapStart = 0;
     kart.position = i + 1;
     kart._cssColor = kartColor(e.kart);
+    if (kart.mesh && Game.shadows) kart.mesh.traverse((o) => { if (o.isMesh && !o.material.transparent) o.castShadow = true; });
     if (e.players && e.players.length === 2) kart.coop = { driver: e.players[0], thrower: e.players[1] };
     if (kart.mesh) {
       kart.mesh.position.copy(kart.pos);
@@ -302,7 +344,11 @@
   function setupRace(trackId, entrants, opts) {
     clearRace();
     const cc = opts.cc;
+    const humanCount = entrants.filter((e) => e.human).length;
+    Game.shadows = !!G.GFX && G.GFX.quality === 'high' && humanCount <= 1;
+    renderer.shadowMap.enabled = Game.shadows;
     const track = (Game.track = new G.Track(trackId, scene, { mirror: !!opts.mirror }));
+    applyTrackLook(track);
     const grid = track.getStartGrid(entrants.length);
     entrants.forEach((e, i) => {
       const kart = makeKart(e, i, track, cc, grid);
@@ -340,7 +386,10 @@
 
   function setupBattle(cfg, entrants) {
     clearRace();
+    Game.shadows = false;
+    renderer.shadowMap.enabled = false;
     const arena = (Game.track = new G.Arena(cfg.arena || (G.ARENAS && G.ARENAS[0].id), scene, {}));
+    applyTrackLook(arena);
     const grid = arena.getStartGrid(entrants.length);
     entrants.forEach((e, i) => {
       const kart = makeKart(e, i, arena, 100, grid);
@@ -954,7 +1003,13 @@
     }
   }
 
+  const fullView = [{ camera, rect: { x: 0, y: 0, w: 1, h: 1 } }];
   function render() {
+    if (G.GFX && G.GFX.render) {
+      const single = views.length <= 1 || Game.state === 'ceremony' || Game.state === 'attract';
+      G.GFX.render(renderer, scene, single ? fullView : views);
+      return;
+    }
     const W = window.innerWidth, H = window.innerHeight;
     if (views.length <= 1 || Game.state === 'ceremony' || Game.state === 'attract') {
       renderer.setScissorTest(false);
@@ -1002,7 +1057,10 @@
     } catch (err) {
       console.error(err);
     }
+    if (G.GFX && G.GFX.update) G.GFX.update(dt);
+    updateSun();
     const r0 = performance.now();
+    renderer.info.reset();
     render();
     Game.perf.render = G.lerp(Game.perf.render, performance.now() - r0, 0.05);
 
@@ -1011,20 +1069,33 @@
     fpsTime += elapsed;
     if (elapsed > 1 / 50) slowTime += elapsed; else slowTime = Math.max(0, slowTime - elapsed * 0.5);
     if (elapsed < 1 / 58) fastTime += elapsed; else fastTime = 0;
-    if (slowTime > 1.5 && pixelRatio > 0.6) {
-      pixelRatio = Math.max(0.6, pixelRatio - 0.15);
+    // quality ladder when frames run long: resolution down to 1x, then drop MSAA, then resolution, then post
+    const qLock = /[?&]q=(high|medium|low)/.exec(location.search);
+    if (qLock) { if (G.GFX && G.GFX.quality !== qLock[1]) G.GFX.setQuality(qLock[1]); slowTime = fastTime = 0; }
+    if (slowTime > 1.5) {
+      const q = G.GFX ? G.GFX.quality : 'low';
+      if (pixelRatio > 1.0) pixelRatio = Math.max(1.0, pixelRatio - 0.15);
+      else if (q === 'high') { G.GFX.setQuality('medium'); G.GFX.lockedMedium = true; }
+      else if (pixelRatio > 0.7) pixelRatio = Math.max(0.7, pixelRatio - 0.15);
+      else if (q === 'medium') G.GFX.setQuality('low');
+      else if (pixelRatio > 0.55) pixelRatio -= 0.1;
       renderer.setPixelRatio(pixelRatio);
       onResize();
       slowTime = 0;
-    } else if (fastTime > 8 && pixelRatio < maxRatio()) {
-      pixelRatio = Math.min(pixelRatio + 0.1, maxRatio());
+    } else if (fastTime > 10) {
+      const q = G.GFX ? G.GFX.quality : 'low';
+      if (pixelRatio < 0.7) pixelRatio = Math.min(0.7, pixelRatio + 0.1);
+      else if (q === 'low' && G.GFX) G.GFX.setQuality('medium');
+      else if (pixelRatio < 1.0) pixelRatio = Math.min(1.0, pixelRatio + 0.1);
+      else if (q === 'medium' && G.GFX && !G.GFX.lockedMedium) G.GFX.setQuality('high');
+      else if (pixelRatio < maxRatio()) pixelRatio = Math.min(pixelRatio + 0.1, maxRatio());
       renderer.setPixelRatio(pixelRatio);
       onResize();
       fastTime = 0;
     }
     if (fpsTime >= 0.5) {
       if (fpsEl.style.display !== 'none') {
-        fpsEl.textContent = Math.round(fpsFrames / fpsTime) + ' fps · ' + renderer.info.render.calls + ' draws · x' + pixelRatio.toFixed(2) +
+        fpsEl.textContent = Math.round(fpsFrames / fpsTime) + ' fps · ' + renderer.info.render.calls + ' draws · x' + pixelRatio.toFixed(2) + ' · ' + (G.GFX ? G.GFX.quality : 'basic') +
           ' · sim ' + Game.perf.step.toFixed(2) + 'ms · gl ' + Game.perf.render.toFixed(2) + 'ms';
       }
       fpsFrames = 0;

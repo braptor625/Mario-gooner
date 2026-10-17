@@ -22,14 +22,136 @@
     return ICO[detail];
   }
 
+  // ---------------------------------------------------------------- shared textures (cached across tracks, never disposed)
+  const TEXCACHE = {};
+  function canvasOK() {
+    try {
+      if (typeof document === 'undefined' || !document.createElement) return false;
+      const c = document.createElement('canvas');
+      return !!c && typeof c.getContext === 'function' && !!c.getContext('2d');
+    } catch (e) { return false; }
+  }
+  function sharedTex(key, w, h, draw, wrap) {
+    if (key in TEXCACHE) return TEXCACHE[key];
+    let t = null;
+    try {
+      if (canvasOK()) {
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        draw(c.getContext('2d'), w, h);
+        t = new THREE.CanvasTexture(c);
+        if (wrap) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; }
+        t.userData = { shared: true };
+      }
+    } catch (e) { t = null; }
+    TEXCACHE[key] = t;
+    return t;
+  }
+  const gfxTex = (name) => (G.GFX && G.GFX.tex && G.GFX.tex[name]) || null;
+  // wrap-around speckle noise used by the fallback asphalt
+  function genAsphalt(ctx, w, h) {
+    const r = mulberry(4242);
+    ctx.fillStyle = '#d4d4d4'; ctx.fillRect(0, 0, w, h);
+    const dot = (x, y, s, v, a) => {
+      ctx.fillStyle = 'rgba(' + v + ',' + v + ',' + v + ',' + a + ')';
+      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
+        const px = x + ox * w, py = y + oy * h;
+        if (px > -s && px < w && py > -s && py < h) ctx.fillRect(px, py, s, s);
+      }
+    };
+    for (let i = 0; i < 90; i++) {            // soft blotches
+      const x = r() * w, y = r() * h, s = 14 + r() * 40, v = r() < 0.5 ? 150 : 255;
+      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
+        const g = ctx.createRadialGradient(x + ox * w, y + oy * h, 0, x + ox * w, y + oy * h, s);
+        g.addColorStop(0, 'rgba(' + v + ',' + v + ',' + v + ',0.16)'); g.addColorStop(1, 'rgba(' + v + ',' + v + ',' + v + ',0)');
+        ctx.fillStyle = g; ctx.fillRect(x + ox * w - s, y + oy * h - s, s * 2, s * 2);
+      }
+    }
+    for (let i = 0; i < 5200; i++) dot((r() * w) | 0, (r() * h) | 0, r() < 0.8 ? 1 : 2, r() < 0.5 ? 60 + ((r() * 60) | 0) : 230 + ((r() * 25) | 0), 0.25 + r() * 0.4);
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {              // hairline cracks
+      let x = r() * w, y = r() * h; ctx.strokeStyle = 'rgba(60,60,60,0.35)'; ctx.beginPath(); ctx.moveTo(x, y);
+      for (let k = 0; k < 6; k++) { x += (r() - 0.5) * 22; y += (r() - 0.3) * 18; ctx.lineTo(x, y); }
+      ctx.stroke();
+    }
+  }
+  const asphaltTex = () => gfxTex('asphalt') || sharedTex('asphalt', 256, 256, genAsphalt, true);
+
+  // 2x2 atlas of puffy cloud sprites (each cell 256x128)
+  function genClouds(ctx, w, h) {
+    const r = mulberry(777), cw = w / 2, ch = h / 2;
+    for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 2; cx++) {
+      const ox = cx * cw, oy = cy * ch, n = 8 + ((r() * 4) | 0);
+      const puffs = [];
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.5) / n, x = cw * (0.17 + 0.66 * t) + (r() - 0.5) * 12;
+        const rad = ch * (0.2 + 0.2 * Math.sin(t * Math.PI) + r() * 0.1);
+        puffs.push([x, ch * 0.62 - rad * 0.45 - Math.sin(t * Math.PI) * ch * 0.12 + (r() - 0.5) * 6, rad]);
+      }
+      const layer = (dy, rgb, a0) => {
+        for (const p of puffs) {
+          const g = ctx.createRadialGradient(ox + p[0], oy + p[1] + dy, p[2] * 0.15, ox + p[0], oy + p[1] + dy, p[2]);
+          g.addColorStop(0, 'rgba(' + rgb + ',' + a0 + ')'); g.addColorStop(0.65, 'rgba(' + rgb + ',' + a0 * 0.75 + ')'); g.addColorStop(1, 'rgba(' + rgb + ',0)');
+          ctx.fillStyle = g; ctx.fillRect(ox, oy, cw, ch);
+        }
+      };
+      ctx.save(); ctx.beginPath(); ctx.rect(ox, oy, cw, ch); ctx.clip();
+      layer(7, '176,196,226', 0.9);     // shaded underside
+      layer(0, '255,255,255', 0.95);    // lit body
+      layer(-5, '255,255,255', 0.55);   // bright tops
+      // flatten the base
+      const g = ctx.createLinearGradient(0, oy + ch * 0.55, 0, oy + ch * 0.9);
+      g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,1)');
+      ctx.globalCompositeOperation = 'destination-out'; ctx.fillStyle = g; ctx.fillRect(ox, oy, cw, ch);
+      ctx.restore(); ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+  const cloudTex = () => sharedTex('clouds', 512, 256, genClouds, false);
+  function genGlow(ctx, w, h) {
+    const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+    g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.08, 'rgba(255,255,255,1)'); g.addColorStop(0.11, 'rgba(255,255,255,0.55)');
+    g.addColorStop(0.3, 'rgba(255,255,255,0.2)'); g.addColorStop(0.6, 'rgba(255,255,255,0.06)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  }
+  const sunTex = () => sharedTex('sunglow', 256, 256, genGlow, false);
+
+  const lum = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  const hash2 = (x, z) => { const s = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453; return s - Math.floor(s); };
+  const smooth01 = (t) => { t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };
+
   // Non-indexed vertex-colored triangle accumulator -> one merged mesh per material.
+  // Normals: flat per face by default; blob()/frustum() (>=6 sides) supply smooth normals (GameCube-style
+  // rounded shading). uvMode batches also carry a uv attribute (see quadUV).
   class Batch {
-    constructor() { this.p = []; this.c = []; }
+    constructor(uvMode) { this.p = []; this.c = []; this.n = []; this.uv = []; this.uvMode = !!uvMode; }
     tri(a, b, c, k) {
-      this.p.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
-      this.c.push(k[0], k[1], k[2], k[0], k[1], k[2], k[0], k[1], k[2]);
+      const p = this.p, n = this.n, cc = this.c;
+      p.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+      cc.push(k[0], k[1], k[2], k[0], k[1], k[2], k[0], k[1], k[2]);
+      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1; nx /= l; ny /= l; nz /= l;
+      n.push(nx, ny, nz, nx, ny, nz, nx, ny, nz);
+      if (this.uvMode) this.uv.push(0, 0, 0, 0, 0, 0);
+    }
+    // triangle with explicit (smooth) vertex normals; auto-aligned with the winding so double-sided lighting stays right
+    triN(a, b, c, k, na, nb, nc) {
+      const p = this.p, n = this.n, cc = this.c;
+      p.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+      cc.push(k[0], k[1], k[2], k[0], k[1], k[2], k[0], k[1], k[2]);
+      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      const fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
+      const s = fx * (na[0] + nb[0] + nc[0]) + fy * (na[1] + nb[1] + nc[1]) + fz * (na[2] + nb[2] + nc[2]) < 0 ? -1 : 1;
+      n.push(na[0] * s, na[1] * s, na[2] * s, nb[0] * s, nb[1] * s, nb[2] * s, nc[0] * s, nc[1] * s, nc[2] * s);
+      if (this.uvMode) this.uv.push(0, 0, 0, 0, 0, 0);
     }
     quad(a, b, c, d, k) { this.tri(a, b, c, k); this.tri(a, c, d, k); }
+    // uvMode only: quad with per-corner uv (a,b,c,d) -> [ua,va,ub,vb,uc,vc,ud,vd]
+    quadUV(a, b, c, d, k, t) {
+      this.tri(a, b, c, k); this.tri(a, c, d, k);
+      const u = this.uv, m = u.length - 12;
+      u[m] = t[0]; u[m + 1] = t[1]; u[m + 2] = t[2]; u[m + 3] = t[3]; u[m + 4] = t[4]; u[m + 5] = t[5];
+      u[m + 6] = t[0]; u[m + 7] = t[1]; u[m + 8] = t[4]; u[m + 9] = t[5]; u[m + 10] = t[6]; u[m + 11] = t[7];
+    }
     box(cx, y0, cz, sx, sy, sz, ry, k) {
       const c = Math.cos(ry), s = Math.sin(ry), hx = sx / 2, hz = sz / 2, y1 = y0 + sy;
       const v = (lx, lz, y) => [cx + lx * c + lz * s, y, cz - lx * s + lz * c];
@@ -41,33 +163,48 @@
     }
     frustum(x, y0, z, r0, r1, h, sides, k, rot) {
       rot = rot || 0;
-      const y1 = y0 + h, top = [x, y1, z];
+      const y1 = y0 + h, top = [x, y1, z], smooth = sides >= 6 && h > 0;
+      const ny = smooth ? (r0 - r1) / h : 0;
       for (let i = 0; i < sides; i++) {
         const a0 = rot + (i / sides) * Math.PI * 2, a1 = rot + ((i + 1) / sides) * Math.PI * 2;
         const b0 = [x + Math.cos(a0) * r0, y0, z + Math.sin(a0) * r0];
         const b1 = [x + Math.cos(a1) * r0, y0, z + Math.sin(a1) * r0];
-        if (r1 <= 0) this.tri(b0, b1, top, k);
-        else {
+        let n0, n1, nm;
+        if (smooth) {
+          const l0 = Math.sqrt(1 + ny * ny), am = (a0 + a1) / 2;
+          n0 = [Math.cos(a0) / l0, ny / l0, Math.sin(a0) / l0]; n1 = [Math.cos(a1) / l0, ny / l0, Math.sin(a1) / l0];
+          nm = [Math.cos(am) / l0, ny / l0, Math.sin(am) / l0];
+        }
+        if (r1 <= 0) {
+          if (smooth) this.triN(b0, b1, top, k, n0, n1, nm); else this.tri(b0, b1, top, k);
+        } else {
           const t0 = [x + Math.cos(a0) * r1, y1, z + Math.sin(a0) * r1];
           const t1 = [x + Math.cos(a1) * r1, y1, z + Math.sin(a1) * r1];
-          this.quad(b0, b1, t1, t0, k); this.tri(top, t0, t1, k);
+          if (smooth) { this.triN(b0, b1, t1, k, n0, n1, n1); this.triN(b0, t1, t0, k, n0, n1, n0); }
+          else this.quad(b0, b1, t1, t0, k);
+          this.tri(top, t0, t1, k);
         }
       }
     }
     blob(x, y, z, sx, sy, sz, k, detail) {
-      const P = icoPositions(detail || 0);
+      const P = icoPositions(detail || 0), isx = 1 / sx, isy = 1 / sy, isz = 1 / sz;
+      const nrm = (i) => {
+        const nx = P[i] * isx, ny = P[i + 1] * isy, nz = P[i + 2] * isz, l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+        return [nx / l, ny / l, nz / l];
+      };
       for (let i = 0; i < P.length; i += 9) {
-        this.tri(
+        this.triN(
           [x + P[i] * sx, y + P[i + 1] * sy, z + P[i + 2] * sz],
           [x + P[i + 3] * sx, y + P[i + 4] * sy, z + P[i + 5] * sz],
-          [x + P[i + 6] * sx, y + P[i + 7] * sy, z + P[i + 8] * sz], k);
+          [x + P[i + 6] * sx, y + P[i + 7] * sy, z + P[i + 8] * sz], k, nrm(i), nrm(i + 3), nrm(i + 6));
       }
     }
     build() {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
       g.setAttribute('color', new THREE.Float32BufferAttribute(this.c, 3));
-      g.computeVertexNormals();
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3));
+      if (this.uvMode && this.uv.length === (this.p.length / 3) * 2) g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
       g.computeBoundingSphere();
       return g;
     }

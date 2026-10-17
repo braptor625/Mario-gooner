@@ -103,15 +103,69 @@
   G.KARTS.forEach((k) => (kartById[k.id] = k));
 
   // ---------------------------------------------------------------- geometry helpers
+  // Everything is built from smooth-shaded primitives (indexed -> non-indexed, smooth normals kept),
+  // merged per material into vertex-coloured BufferGeometries and cached.
   const geoCache = {};
-  function baseGeo(t, a) {
-    const key = t + ':' + a.join(',');
-    if (geoCache[key]) return geoCache[key];
-    let g;
-    if (t === 'box') g = new THREE.BoxGeometry(a[0], a[1], a[2]);
-    else if (t === 'sph') g = new THREE.SphereGeometry(a[0], a[1] || 10, a[2] || 8);
-    else if (t === 'cyl') g = new THREE.CylinderGeometry(a[0], a[1], a[2], a[3] || 10, 1);
-    else g = new THREE.ConeGeometry(a[0], a[1], a[2] || 6, 1);
+  const UV_WHITE = [0.0625, 0.9375]; // body atlas: solid white texel
+
+  // Rounded box: 'true' (3 segments/axis, real bevel) or 'soft' (2 segments, pillow). Smooth normals.
+  function rboxGeo(w, h, d, r, hard) {
+    const hx = w / 2, hy = h / 2, hz = d / 2;
+    r = Math.min(r, hx * 0.98, hy * 0.98, hz * 0.98);
+    const ix = hx - r, iy = hy - r, iz = hz - r;
+    const g = new THREE.BoxGeometry(1, 1, 1, hard ? 3 : 2, hard ? 3 : 2, hard ? 3 : 2);
+    const pa = g.attributes.position, na = g.attributes.normal;
+    const mapc = (v, hh, ii) => {
+      if (!hard) return v * 2 * hh;
+      const a = Math.abs(v);
+      return Math.sign(v) * (a > 0.4 ? hh : ii);
+    };
+    for (let i = 0; i < pa.count; i++) {
+      const px = mapc(pa.getX(i), hx, ix), py = mapc(pa.getY(i), hy, iy), pz = mapc(pa.getZ(i), hz, iz);
+      const qx = Math.max(-ix, Math.min(ix, px)), qy = Math.max(-iy, Math.min(iy, py)), qz = Math.max(-iz, Math.min(iz, pz));
+      let nx = px - qx, ny = py - qy, nz = pz - qz;
+      const l = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (l > 1e-6) { nx /= l; ny /= l; nz /= l; pa.setXYZ(i, qx + nx * r, qy + ny * r, qz + nz * r); na.setXYZ(i, nx, ny, nz); }
+      else pa.setXYZ(i, px, py, pz);
+    }
+    return g;
+  }
+
+  function sphSegs(sz) {
+    return sz > 0.45 ? [22, 16] : sz > 0.25 ? [18, 13] : sz > 0.13 ? [13, 9] : sz > 0.065 ? [10, 7] : [7, 5];
+  }
+
+  function baseGeo(t, a, sc) {
+    const mx = Math.max(sc[0], sc[1], sc[2]);
+    let key, g;
+    if (t === 'sph') {
+      const sg = sphSegs(a[0] * mx * (G.GFX_LOD || 1));
+      key = 's:' + a[0] + ',' + sg;
+      if (geoCache[key]) return geoCache[key];
+      g = new THREE.SphereGeometry(a[0], sg[0], sg[1]);
+    } else if (t === 'box') {
+      const dims = [a[0] * sc[0], a[1] * sc[1], a[2] * sc[2]];
+      const mn = Math.min(dims[0], dims[1], dims[2]), mxd = Math.max(dims[0], dims[1], dims[2]);
+      const hard = mxd >= 0.55 && mn >= 0.09;
+      const rr = a[3] !== undefined ? a[3] : Math.min(0.14, mn * 0.42);
+      key = 'b:' + a.join(',') + (hard ? 'h' : 's') + rr;
+      if (geoCache[key]) return geoCache[key];
+      g = rboxGeo(a[0], a[1], a[2], rr / Math.max(1e-3, 1), hard);
+    } else if (t === 'cyl') {
+      const seg = a[0] * mx > 0.18 ? 18 : a[0] * mx > 0.07 ? 12 : 8;
+      key = 'c:' + a.slice(0, 3).join(',') + ',' + seg;
+      if (geoCache[key]) return geoCache[key];
+      g = new THREE.CylinderGeometry(a[0], a[1], a[2], seg, 1);
+    } else if (t === 'tor') {
+      key = 't:' + a.join(',');
+      if (geoCache[key]) return geoCache[key];
+      g = new THREE.TorusGeometry(a[0], a[1], a[2] || 8, a[3] || 16);
+    } else {
+      const seg = a[0] * mx > 0.12 ? 14 : a[0] * mx > 0.05 ? 9 : 6;
+      key = 'k:' + a[0] + ',' + a[1] + ',' + seg;
+      if (geoCache[key]) return geoCache[key];
+      g = new THREE.ConeGeometry(a[0], a[1], seg, 1);
+    }
     g = g.toNonIndexed();
     geoCache[key] = g;
     return g;
@@ -121,40 +175,55 @@
   const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
   const _p = new THREE.Vector3(), _s = new THREE.Vector3();
 
-  function merge(parts) {
+  // parts: primitives (t/a/c/p/s/r) or raw ({geo, c}) with optional uv:[u,v] override
+  function merge(parts, defUV) {
+    defUV = defUV || UV_WHITE;
+    const gs = parts.map((pt) => pt.geo || baseGeo(pt.t, pt.a, pt.s));
     let n = 0;
-    const gs = parts.map((pt) => baseGeo(pt.t, pt.a));
     gs.forEach((g) => (n += g.attributes.position.count));
-    const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3);
+    const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3), uv = new Float32Array(n * 2);
     let o = 0;
     parts.forEach((pt, i) => {
-      const g = gs[i].clone();
-      _e.set(pt.r[0], pt.r[1], pt.r[2]);
-      _q.setFromEuler(_e);
-      _p.set(pt.p[0], pt.p[1], pt.p[2]);
-      _s.set(pt.s[0], pt.s[1], pt.s[2]);
-      _m.compose(_p, _q, _s);
-      g.applyMatrix4(_m);
+      let g = gs[i];
+      if (!pt.geo) {
+        g = g.clone();
+        _e.set(pt.r[0], pt.r[1], pt.r[2]);
+        _q.setFromEuler(_e);
+        _p.set(pt.p[0], pt.p[1], pt.p[2]);
+        _s.set(pt.s[0], pt.s[1], pt.s[2]);
+        _m.compose(_p, _q, _s);
+        g.applyMatrix4(_m);
+      }
       const c = new THREE.Color(pt.c);
       const cnt = g.attributes.position.count;
       pos.set(g.attributes.position.array, o * 3);
       nor.set(g.attributes.normal.array, o * 3);
-      for (let k = 0; k < cnt; k++) { col[(o + k) * 3] = c.r; col[(o + k) * 3 + 1] = c.g; col[(o + k) * 3 + 2] = c.b; }
+      const guv = pt.geo && g.attributes.uv && !pt.uv ? g.attributes.uv.array : null;
+      const u = pt.uv || defUV;
+      for (let k = 0; k < cnt; k++) {
+        col[(o + k) * 3] = c.r; col[(o + k) * 3 + 1] = c.g; col[(o + k) * 3 + 2] = c.b;
+        uv[(o + k) * 2] = guv ? guv[k * 2] : u[0]; uv[(o + k) * 2 + 1] = guv ? guv[k * 2 + 1] : u[1];
+      }
       o += cnt;
-      g.dispose();
+      if (!pt.geo) g.dispose();
     });
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     geo.computeBoundingSphere();
     geo.computeBoundingBox();
     return geo;
   }
 
+  // rider material: smooth Phong + soft fresnel rim
   let sharedMat = null;
   function mat() {
-    return sharedMat || (sharedMat = new THREE.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: 28, specular: 0x333333 }));
+    if (sharedMat) return sharedMat;
+    sharedMat = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 46, specular: 0x4a4a4a });
+    if (G.GFX && G.GFX.patchRim) { try { G.GFX.patchRim(sharedMat, { color: 0xfff1dc, strength: 0.3, power: 2.4 }); } catch (e) {} }
+    return sharedMat;
   }
   function shade(c, k) { const x = new THREE.Color(c); return k < 1 ? x.multiplyScalar(k) : x.lerp(new THREE.Color(0xffffff), k - 1); }
 
@@ -165,10 +234,22 @@
   // cone lean helper: tilt outward in direction (dx,dz)
   const lean = (dx, dz, k) => [dz * k, 0, -dx * k];
 
-  function eyes(h, x, y, z, r, spread) {
+  const IRIS = {
+    blaze: 0x3a8ae0, ember: 0x2a9a5a, rosa: 0x8a4ad0, lily: 0x2fa89a, pip: 0xffb02a, pop: 0x2a6ad8, grub: 0x7a4a1a, nib: 0x4aa83a,
+    krag: 0xe0a82a, krik: 0x3a6ad8, volt: 0x35c8e8, vex: 0xb43aff, shelby: 0x2a8ad0, swoop: 0x7a3ad0, bitsy: 0x7a4a2a, bop: 0x2a8a6a,
+    spud: 0x4a2a12, sprout: 0x3a9a3a, thorn: 0xffd22a, wisp: 0x3a5ae0,
+  };
+  let irisCol = 0x4a8ae0;
+
+  // proper eyes: white sclera, coloured iris, pupil, glint
+  function eyes(h, x, y, z, r) {
+    const R = r * 1.5;
     for (const sd of [-1, 1]) {
-      h.push(P('sph', [r, 8, 6], DARK, [sd * x, y, z]));
-      h.push(P('sph', [r * 0.4, 6, 4], WHITE, [sd * (x - r * 0.25), y + r * 0.45, z + r * 0.8]));
+      const ex = sd * x;
+      h.push(P('sph', [R], WHITE, [ex, y, z - R * 0.28], [1, 1.2, 0.72]));
+      h.push(P('sph', [R * 0.78], irisCol, [ex - sd * R * 0.08, y - R * 0.04, z + R * 0.14], [1, 1.12, 0.42]));
+      h.push(P('sph', [R * 0.44], 0x120f18, [ex - sd * R * 0.08, y - R * 0.05, z + R * 0.24], [1, 1.1, 0.4]));
+      h.push(P('sph', [R * 0.2], WHITE, [ex - sd * R * 0.3, y + R * 0.3, z + R * 0.33], [1, 1, 0.5]));
     }
   }
 
@@ -177,15 +258,19 @@
     const b = [], h = [];
     let headR = 0.32;
     let headScale = [1, 1, 1];
-    // default torso / limbs
-    const torso = () => b.push(P('box', [0.5, 0.42, 0.4], c.primary, [0, 0.27, 0]));
+    irisCol = IRIS[id] || 0x4a8ae0;
+    // default torso / limbs (round, chunky, toy-like)
+    const torso = () => b.push(P('sph', [0.27, 12, 9], c.primary, [0, 0.27, 0], [1.0, 0.98, 0.84]));
     const limbs = (armCol, legCol, footCol, handCol, big) => {
       const k = big || 1;
       for (const sd of [-1, 1]) {
-        b.push(P('box', [0.14 * k, 0.14 * k, 0.42], armCol, [sd * 0.32 * k, 0.32, 0.2], [1, 1, 1], [0.35, 0, 0]));
-        b.push(P('sph', [0.09 * k, 6, 5], handCol, [sd * 0.32 * k, 0.28, 0.43]));
-        b.push(P('box', [0.18, 0.17, 0.42], legCol, [sd * 0.14, 0.04, 0.27]));
-        b.push(P('box', [0.2, 0.14, 0.2], footCol, [sd * 0.14, -0.04, 0.5]));
+        b.push(P('cyl', [0.078 * k, 0.07 * k, 0.44, 10], armCol, [sd * 0.32 * k, 0.32, 0.2], [1, 1, 1], [HP + 0.35, 0, 0]));
+        b.push(P('sph', [0.1 * k], armCol, [sd * 0.32 * k, 0.38, 0.0]));
+        b.push(P('cyl', [0.098 * k, 0.098 * k, 0.07, 10], shade(armCol, 1.28), [sd * 0.32 * k, 0.3, 0.37], [1, 1, 1], [HP + 0.35, 0, 0])); // cuff
+        b.push(P('sph', [0.118 * k], handCol, [sd * 0.32 * k, 0.27, 0.44])); // glove / hand
+        b.push(P('cyl', [0.09, 0.085, 0.42, 10], legCol, [sd * 0.14, 0.04, 0.27], [1, 1, 1], [HP, 0, 0]));
+        b.push(P('sph', [0.115], footCol, [sd * 0.14, -0.035, 0.52], [1, 0.72, 1.45])); // shoe
+        b.push(P('sph', [0.1], shade(footCol, 1.35), [sd * 0.14, -0.015, 0.6], [0.85, 0.6, 0.7])); // toe cap
       }
     };
     switch (id) {
@@ -594,6 +679,17 @@
         break;
       }
     }
+    // shared face features (skip characters that already have snouts / beaks / custom mouths)
+    const NOSE = { blaze: 1, ember: 1, rosa: 1, lily: 1, pop: 1 };
+    const MOUTH = { blaze: 1, ember: 1, rosa: 1, lily: 1, nib: 1, krik: 1 };
+    const surfZ = (y) => headR * Math.sqrt(Math.max(0.05, 1 - (y / headR) * (y / headR)));
+    if (NOSE[id]) h.push(P('sph', [0.05], shade(c.skin, 0.9).lerp(new THREE.Color(0xff8a7a), 0.25), [0, -0.045, surfZ(-0.045) + 0.005], [1, 0.85, 0.8]));
+    if (MOUTH[id]) {
+      const my = id === 'nib' ? -0.22 : id === 'krik' ? -0.2 : -0.135, mz = surfZ(my) - 0.012;
+      h.push(P('sph', [0.075], 0x4a1620, [0, my, mz], [1.25, 0.62, 0.38]));
+      h.push(P('sph', [0.04], 0xff7a8a, [0, my - 0.012, mz + 0.004], [1.2, 0.5, 0.3]));
+      h.push(P('sph', [0.058], 0xffffff, [0, my + 0.018, mz + 0.006], [1.3, 0.28, 0.22]));
+    }
     return { body: b, head: h };
   }
 
@@ -610,7 +706,9 @@
     body.name = 'riderBody';
     const head = new THREE.Mesh(cache.head, mat());
     head.name = 'riderHead';
-    head.position.set(0, 0.78, 0);
+    head.position.set(0, 0.8, 0);
+    head.scale.setScalar(1.14);
+    head.castShadow = true; body.castShadow = true;
     g.add(body, head);
     g.userData.head = head;
     g.userData.bodyMesh = body;
