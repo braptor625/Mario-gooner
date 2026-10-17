@@ -651,9 +651,12 @@
     _mat(opts, basic) {
       opts = Object.assign({}, opts);
       delete opts.flatShading; // not supported by Lambert/Basic in r128
+      const detail = opts.detail; delete opts.detail;
       const m = basic
         ? new THREE.MeshBasicMaterial(Object.assign({ vertexColors: true, side: THREE.DoubleSide }, opts))
         : new THREE.MeshLambertMaterial(Object.assign({ vertexColors: true, side: THREE.DoubleSide }, opts));
+      // world-space detail texture on big lit surfaces (never on emissive/basic, textured or transparent ones)
+      if (!basic && detail !== false && !opts.map && !opts.transparent) this._detail(m, typeof detail === 'object' ? detail : undefined);
       this._mats.push(m);
       return m;
     }
@@ -682,18 +685,35 @@
       scene.fog = new THREE.Fog(cfg.fog[0], cfg.fog[1], cfg.fog[2]);
       scene.background = new THREE.Color(cfg.bg);
 
-      // lights
-      this.hemi = new THREE.HemisphereLight(cfg.hemi[0], cfg.hemi[1], cfg.hemi[2]);
+      // lights: hemisphere + warm sun (+ soft cool fill); shadows are toggled by main (castShadow stays false here)
+      const mode = (this.skyMode = this._skyMode(def));
+      const off = mode === 'sunset' ? [150, 75, 70] : mode === 'night' ? [60, 140, 80] : mode === 'day' ? [90, 130, 60] : [50, 140, 40];
+      const dayish = mode === 'day' || mode === 'sunset';
+      this._sunDir = new THREE.Vector3(off[0], off[1], off[2]).normalize();
+      const sunC = dayish ? mix(col(cfg.sun[0]), mode === 'sunset' ? [1, 0.72, 0.45] : [1, 0.93, 0.8], mode === 'sunset' ? 0.4 : 0.3) : col(cfg.sun[0]);
+      this.hemi = new THREE.HemisphereLight(cfg.hemi[0], cfg.hemi[1], cfg.hemi[2] * (dayish ? 0.9 : 1));
       this._add(this.hemi);
-      this.sun = new THREE.DirectionalLight(cfg.sun[0], cfg.sun[1]);
-      this.sun.position.set(this.px[0] + 90, 130, this.pz[0] + 60);
+      this.sun = new THREE.DirectionalLight(new THREE.Color(sunC[0], sunC[1], sunC[2]), cfg.sun[1]);
+      this.sun.position.set(this.px[0] + off[0], off[1], this.pz[0] + off[2]);
       this.sun.target.position.set(this.px[0], 0, this.pz[0]);
+      this.sun.userData.offset = new THREE.Vector3(off[0], off[1], off[2]);
       this.sun.castShadow = false;
-      this.sun.shadow.mapSize.set(1024, 1024);
+      this.sun.shadow.mapSize.set(2048, 2048);
       const sc = this.sun.shadow.camera;
-      sc.left = -70; sc.right = 70; sc.top = 70; sc.bottom = -70; sc.near = 1; sc.far = 400;
-      this.sun.shadow.bias = -0.0008;
+      sc.left = -60; sc.right = 60; sc.top = 60; sc.bottom = -60; sc.near = 1; sc.far = 500;
+      this.sun.shadow.bias = -0.0006;
+      this.sun.shadow.normalBias = 0.02;
       this._add(this.sun); this._add(this.sun.target);
+      if (dayish || mode === 'night') {
+        // soft fill from the opposite side (direction only: its target stays at the origin)
+        const fc = mix(col(cfg.sky[0]), [1, 1, 1], 0.5);
+        this.fill = new THREE.DirectionalLight(new THREE.Color(fc[0], fc[1], fc[2]), dayish ? 0.22 : 0.12);
+        this.fill.position.set(-off[0], 45, -off[2]);
+        this._add(this.fill);
+      }
+      if (G.GFX && G.GFX.setSun) {
+        try { G.GFX.setSun(new THREE.Vector3(this.mirror ? -off[0] : off[0], off[1], off[2]).normalize(), this.sun.color.getHex()); } catch (e) { /* ignore */ }
+      }
 
       // reserved circles (lake) before scatter
       let lake = null;
@@ -741,14 +761,50 @@
         obj.updateMatrixWorld(true);
       };
     }
-    _buildSky(def) {
+    // sky style: explicit def.sky ('day'|'sunset'|'night'|'space'|'indoor') or derived from the theme colours
+    _skyMode(def) {
+      const ok = ['day', 'sunset', 'night', 'space', 'indoor'];
+      if (def.sky && ok.indexOf(def.sky) >= 0) return def.sky;
       const cfg = this.cfg;
-      const geo = new THREE.SphereGeometry(300, 20, 14);
+      if (def.style === 'starlight' || def.theme === 'starlight') return 'space';
+      const mid = col(cfg.sky[1]), top = col(cfg.sky[0]);
+      if (lum(mid) < 0.12) return (mid[0] > mid[2] * 1.4 && mid[0] > mid[1] * 1.4) ? 'indoor' : 'night';
+      if (mid[0] - mid[2] > 0.4 && lum(top) < 0.55) return 'sunset';
+      return 'day';
+    }
+    _detail(m, o) {
+      if (G.GFX && G.GFX.patchDetail) { try { G.GFX.patchDetail(m, o); } catch (e) { /* ignore */ } }
+      return m;
+    }
+
+    _buildSky(def) {
+      const cfg = this.cfg, mode = this.skyMode, rng = this.rng, style = def.style;
+      const top = col(cfg.sky[0]), mid = col(cfg.sky[1]), bot = col(cfg.sky[2]), fogc = col(cfg.fog[0]);
+      const sd = this._sunDir;
+      const warm = mode === 'sunset' ? col(0xff9a4a) : col(0xffe2a8);
+      const hz = (mode === 'day' || mode === 'sunset') ? mix(mid, fogc, 0.55) : mid;
+
+      // ---- dome: smooth vertical gradient + sun glow + warm horizon band
+      const geo = new THREE.SphereGeometry(300, 48, 32);
       const pos = geo.attributes.position, colors = new Float32Array(pos.count * 3);
-      const top = col(cfg.sky[0]), mid = col(cfg.sky[1]), bot = col(cfg.sky[2]);
       for (let i = 0; i < pos.count; i++) {
-        const v = pos.getY(i) / 300;
-        const c = v >= 0 ? mix(mid, top, Math.pow(v, 0.6)) : mix(mid, bot, Math.min(1, -v * 3));
+        const dx = pos.getX(i) / 300, v = pos.getY(i) / 300, dz = pos.getZ(i) / 300;
+        let c;
+        if (v >= 0) {
+          c = v < 0.28 ? mix(hz, mid, smooth01(v / 0.28)) : mix(mid, top, smooth01(Math.pow((v - 0.28) / 0.72, 0.85)));
+        } else c = mix(hz, bot, Math.min(1, -v * 3));
+        if (mode === 'day' || mode === 'sunset') {
+          const g = Math.max(0, dx * sd.x + v * sd.y + dz * sd.z);
+          const k = mode === 'sunset' ? (Math.pow(g, 2.5) * 0.5 + Math.pow(g, 14) * 0.5) : (Math.pow(g, 5) * 0.2 + Math.pow(g, 40) * 0.4);
+          c = [c[0] + warm[0] * k, c[1] + warm[1] * k, c[2] + warm[2] * k];
+          if (mode === 'sunset') {
+            const band = Math.exp(-v * v * 60) * (0.25 + 0.75 * Math.pow(g, 1.3)) * 0.6;
+            c = mix(c, warm, band);
+          }
+        } else if (mode === 'night') {
+          const g = Math.max(0, dx * sd.x + v * sd.y + dz * sd.z), k = Math.pow(g, 24) * 0.35;
+          c = [c[0] + 0.5 * k, c[1] + 0.6 * k, c[2] + 0.8 * k];
+        }
         colors[i * 3] = c[0]; colors[i * 3 + 1] = c[1]; colors[i * 3 + 2] = c[2];
       }
       geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -760,45 +816,69 @@
       this._follow(sky);
       this._add(sky);
 
-      // decorations (clouds, distant ridges, planets), locked to the camera so they sit at infinity
-      const b = new Batch(), rng = this.rng, theme = this.theme, R = 270;
-      const ring = (n, fn) => { for (let i = 0; i < n; i++) fn((i / n) * Math.PI * 2 + rng() * 0.2, i); };
-      if (theme === 'meadow') {
-        b.blob(Math.cos(0.9) * R, 150, Math.sin(0.9) * R, 16, 16, 16, col(0xfff6c0), 1);
-        ring(26, (a) => b.blob(Math.cos(a) * 285, -5, Math.sin(a) * 285, 60 + rng() * 40, 26 + rng() * 22, 40, mix(col(0x7fb38a), col(0xa9d4b4), rng()), 0));
-        ring(16, (a) => {
-          const y = 85 + rng() * 55, r = 230 + rng() * 40, cx = Math.cos(a) * r, cz = Math.sin(a) * r;
-          for (let k = 0; k < 3; k++) b.blob(cx + (k - 1) * 14, y + (k === 1 ? 4 : 0), cz + rng() * 6, 16, 5.5, 9, col(0xffffff), 0);
-        });
-      } else if (theme === 'dunes') {
-        b.blob(Math.cos(2.2) * R, 70, Math.sin(2.2) * R, 26, 26, 26, col(0xffefc0), 1);
-        ring(26, (a) => b.blob(Math.cos(a) * 285, -8, Math.sin(a) * 285, 80 + rng() * 40, 18 + rng() * 22, 45, mix(col(0xd9a85c), col(0xe8c07a), rng()), 0));
-        ring(5, (a) => b.frustum(Math.cos(a) * 288, -10, Math.sin(a) * 288, 46, 4, 50 + rng() * 25, 5, col(0xc98d50), 0));
-      } else if (theme === 'glacier') {
-        ring(22, (a) => {
-          const x = Math.cos(a) * 285, z = Math.sin(a) * 285, h = 70 + rng() * 60, r = 50 + rng() * 30;
-          b.frustum(x, -10, z, r, 0, h, 6, col(0x8fb0cf), rng() * 3);
-          b.frustum(x, -10 + h * 0.55, z, r * 0.45, 0, h * 0.45, 6, col(0xffffff), 0);
-        });
-        ring(8, (a) => b.blob(Math.cos(a) * 250, 120 + rng() * 40, Math.sin(a) * 250, 40, 4, 12, col(0xf4fbff), 0));
-      } else {
-        ring(7, (a, i) => {
-          const y = 40 + rng() * 120, r = 120 + rng() * 100, rad = 8 + rng() * 22;
-          const c = [col(0xff7ab8), col(0x6fd8ff), col(0xffd36f), col(0xa98bff)][i % 4];
-          b.blob(Math.cos(a) * r * 1.2, y, Math.sin(a) * r * 1.2, rad, rad, rad, c, 1);
-        });
-        b.blob(-150, 90, -190, 40, 40, 40, col(0x7a5cf0), 1);
-        b.blob(-150, 90, -190, 62, 1.5, 62, col(0xffc6f5), 1);
+      // ---- distant mountain / hill silhouette rings (one merged mesh, aerial-perspective tinted)
+      const P = [], C = [], I = [];
+      const tint = (c, f) => mix(c, fogc, f);
+      const ring = (R, y0, segs, hFn, stops) => {
+        const base = P.length / 3, S = stops.length;
+        for (let k = 0; k <= segs; k++) {
+          const a = (k / segs) * Math.PI * 2, h = hFn(a), cs = Math.cos(a) * R, sn = Math.sin(a) * R;
+          for (let s = 0; s < S; s++) { P.push(cs, y0 + (h - y0) * stops[s][0], sn); C.push(stops[s][1][0], stops[s][1][1], stops[s][1][2]); }
+        }
+        for (let k = 0; k < segs; k++) for (let s = 0; s < S - 1; s++) {
+          const a = base + k * S + s, b = a + 1, c = a + S + 1, d = a + S;
+          I.push(a, b, c, a, c, d);
+        }
+      };
+      const ph = () => rng() * 6.28;
+      const rolling = (h0, amp) => { const p1 = ph(), p2 = ph(), p3 = ph(); return (a) => Math.max(2, h0 * (0.62 + amp * (0.5 * Math.sin(a * 3 + p1) + 0.35 * Math.sin(a * 7 + p2) + 0.2 * Math.sin(a * 13 + p3)))); };
+      const ridged = (h0) => {
+        const p1 = ph(), p2 = ph();
+        return (a) => h0 * (0.3 + 0.7 * (Math.pow(1 - Math.abs(Math.sin(a * 5 + p1)), 1.6) * 0.6 + Math.pow(1 - Math.abs(Math.sin(a * 11 + p2)), 2.2) * 0.4));
+      };
+      const mesa = (h0) => { const p1 = ph(), p2 = ph(); return (a) => h0 * (0.12 + 0.88 * smooth01(Math.sin(a * 4 + p1) * 2.2 + Math.sin(a * 9 + p2) * 0.6)); };
+      const grad = (c, f0, f1) => [[0, tint(c, f0)], [0.3, tint(c, f1)], [1, c]];
+      if (mode === 'day' || mode === 'sunset') {
+        const sunset = mode === 'sunset', emb = col(cfg.emb);
+        const hill = lum(emb) > 0.03 ? mix(emb, col(cfg.ground), 0.3) : col(cfg.ground);
+        if (style === 'dunes') {
+          ring(292, -10, 120, mesa(46), grad(sunset ? col(0x8a4a3a) : col(0xc9805a), 0.85, 0.5));
+          ring(282, -10, 160, rolling(22, 0.5), grad(sunset ? col(0xa8624a) : col(0xdcb070), 0.8, 0.3));
+          ring(272, -10, 160, rolling(10, 0.6), grad(mix(col(cfg.ground), col(0xe8c88a), 0.5), 0.7, 0.2));
+        } else if (style === 'glacier') {
+          const rock = sunset ? col(0x7a6a9a) : col(0x7f9bbd), snow = sunset ? col(0xffd8c8) : col(0xffffff);
+          ring(292, -10, 180, ridged(100), [[0, tint(rock, 0.85)], [0.3, tint(rock, 0.5)], [0.55, rock], [0.68, tint(snow, 0.08)], [1, snow]]);
+          ring(280, -10, 160, rolling(26, 0.5), grad(sunset ? col(0xe8c8d8) : col(0xe6f2fb), 0.7, 0.25));
+          ring(270, -10, 160, rolling(10, 0.6), grad(sunset ? col(0xf4dcd8) : col(0xf4faff), 0.6, 0.15));
+        } else {
+          ring(292, -10, 180, ridged(78), grad(sunset ? col(0x6a4a8a) : col(0x6f8fc4), 0.82, 0.5));
+          ring(282, -10, 180, rolling(34, 0.55), grad(sunset ? mul(hill, 0.55) : mix(hill, col(0x5f9a8a), 0.35), 0.7, 0.3));
+          ring(271, -10, 180, rolling(13, 0.65), grad(sunset ? mul(hill, 0.5) : hill, 0.5, 0.12));
+        }
+      } else if (mode === 'night') {
+        const base = mix(col(0x070c26), fogc, 0.3);
+        ring(292, -10, 180, ridged(70), grad(mix(base, col(0x2a3a70), 0.35), 0.5, 0.25));
+        ring(278, -10, 180, rolling(24, 0.6), grad(base, 0.3, 0.1));
       }
-      const dm = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, depthWrite: false, side: THREE.DoubleSide });
-      this._mats.push(dm);
-      const deco = this._mesh(b, dm, true);
-      if (deco) { deco.renderOrder = -999; this._follow(deco, theme === 'meadow' ? 0.004 : 0); this._anim.deco = deco; }
+      if (P.length) {
+        const rg = new THREE.BufferGeometry();
+        rg.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+        rg.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+        rg.setIndex(I);
+        this._geoms.push(rg);
+        const rm = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, depthWrite: false, depthTest: false, side: THREE.DoubleSide });
+        this._mats.push(rm);
+        const m = new THREE.Mesh(rg, rm);
+        m.renderOrder = -999;
+        this._follow(m);
+        this._add(m);
+      }
 
-      if (theme === 'starlight') {
-        const n = 1800, pp = new Float32Array(n * 3), cc = new Float32Array(n * 3);
+      // ---- stars (night / space) and space-only planets
+      if (mode === 'night' || mode === 'space') {
+        const n = mode === 'space' ? 1800 : 900, pp = new Float32Array(n * 3), cc = new Float32Array(n * 3);
         for (let i = 0; i < n; i++) {
-          const u = rng() * 2 - 1, a = rng() * Math.PI * 2, s = Math.sqrt(1 - u * u), r = 290;
+          const u = mode === 'night' ? rng() * 0.95 + 0.05 : rng() * 2 - 1, a = rng() * Math.PI * 2, s = Math.sqrt(1 - u * u), r = 290;
           pp[i * 3] = Math.cos(a) * s * r; pp[i * 3 + 1] = u * r; pp[i * 3 + 2] = Math.sin(a) * s * r;
           const c = [col(0xffffff), col(0xbfd8ff), col(0xffe4b0), col(0xffc0ea)][(rng() * 4) | 0], k = 0.5 + rng() * 0.5;
           cc[i * 3] = c[0] * k; cc[i * 3 + 1] = c[1] * k; cc[i * 3 + 2] = c[2] * k;
@@ -814,6 +894,90 @@
         this._follow(pts, 0.006);
         this._add(pts);
       }
+      if (mode === 'space') {
+        const b = new Batch(), R = 270;
+        for (let i = 0; i < 7; i++) {
+          const a = (i / 7) * Math.PI * 2 + rng() * 0.2;
+          const y = 40 + rng() * 120, r = 120 + rng() * 100, rad = 8 + rng() * 22;
+          const c = [col(0xff7ab8), col(0x6fd8ff), col(0xffd36f), col(0xa98bff)][i % 4];
+          b.blob(Math.cos(a) * r * 1.2, y, Math.sin(a) * r * 1.2, rad, rad, rad, c, 1);
+        }
+        b.blob(-150, 90, -190, 40, 40, 40, col(0x7a5cf0), 1);
+        b.blob(-150, 90, -190, 62, 1.5, 62, col(0xffc6f5), 1);
+        const dm = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, depthWrite: false, side: THREE.DoubleSide });
+        this._mats.push(dm);
+        const deco = this._mesh(b, dm, true);
+        if (deco) { deco.renderOrder = -997; this._follow(deco, 0); this._anim.deco = deco; }
+      }
+
+      // ---- cloud billboards (one mesh, painted atlas) + sun/moon disc with glow (one mesh)
+      const ctex = mode === 'indoor' ? null : cloudTex();
+      if (ctex) {
+        const CP = [], CU = [], CC = [], CI = [];
+        const R = 255;
+        const layers = {
+          day: [[7, 15, 95, [0.97, 0.98, 1], 0.88], [18, 34, 110, [1, 1, 1], 1], [40, 62, 80, [1, 1, 1], 1]],
+          sunset: [[5, 13, 100, [1, 0.62, 0.5], 0.9], [17, 32, 115, [1, 0.78, 0.68], 1], [38, 60, 85, [0.92, 0.72, 0.8], 1]],
+          night: [[10, 28, 120, [0.2, 0.24, 0.42], 0.8], [34, 58, 90, [0.16, 0.2, 0.36], 0.8]],
+          space: [[10, 30, 190, [0.55, 0.3, 0.85], 0.5], [34, 60, 150, [0.3, 0.55, 0.9], 0.5]],
+        }[mode] || [];
+        const per = mode === 'day' || mode === 'sunset' ? 12 : mode === 'night' ? 6 : 4;
+        let vi = 0;
+        layers.forEach((L, li) => {
+          const nn = per - (li === 2 ? 3 : 0);
+          for (let n = 0; n < nn; n++) {
+            const az = ((n + 0.15 * li + rng() * 0.7) / nn) * Math.PI * 2, el = (L[0] + rng() * (L[1] - L[0])) * Math.PI / 180;
+            const w = L[2] * (0.7 + rng() * 0.6) * 0.5, h = w * 0.5;
+            const ce = Math.cos(el), cx = Math.cos(az) * ce * R, cy = Math.sin(el) * R, cz = Math.sin(az) * ce * R;
+            const rx = -Math.sin(az), rz = Math.cos(az);
+            const cell = (rng() * 4) | 0, u0 = (cell & 1) * 0.5, v0 = 0.5 * (1 - (cell >> 1));
+            const flip = rng() < 0.5, ua = flip ? u0 + 0.5 : u0, ub = flip ? u0 : u0 + 0.5;
+            const shade = 0.92 + rng() * 0.08, c = L[3];
+            const k = [c[0] * shade, c[1] * shade, c[2] * shade];
+            CP.push(cx - rx * w, cy - h, cz - rz * w, cx + rx * w, cy - h, cz + rz * w, cx + rx * w, cy + h, cz + rz * w, cx - rx * w, cy + h, cz - rz * w);
+            CU.push(ua, v0, ub, v0, ub, v0 + 0.5, ua, v0 + 0.5);
+            for (let q = 0; q < 4; q++) CC.push(k[0], k[1], k[2]);
+            CI.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3); vi += 4;
+          }
+        });
+        if (vi) {
+          const cg = new THREE.BufferGeometry();
+          cg.setAttribute('position', new THREE.Float32BufferAttribute(CP, 3));
+          cg.setAttribute('uv', new THREE.Float32BufferAttribute(CU, 2));
+          cg.setAttribute('color', new THREE.Float32BufferAttribute(CC, 3));
+          cg.setIndex(CI);
+          this._geoms.push(cg);
+          const cm = new THREE.MeshBasicMaterial({ map: ctex, vertexColors: true, transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide, opacity: layers[0][4] });
+          this._mats.push(cm);
+          const cl = new THREE.Mesh(cg, cm);
+          cl.renderOrder = -997;
+          this._follow(cl, mode === 'space' ? 0.002 : 0.004);
+          this._add(cl);
+        }
+      }
+      const stex = (mode === 'day' || mode === 'sunset' || mode === 'night') ? sunTex() : null;
+      if (stex) {
+        const R = 280, sz = mode === 'night' ? 34 : mode === 'sunset' ? 78 : 66;
+        const cx = sd.x * R, cy = sd.y * R, cz = sd.z * R;
+        // basis perpendicular to the sun direction
+        let rx = -sd.z, rz = sd.x; const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl;
+        const ux = -sd.y * sd.x / (Math.hypot(sd.x, sd.z) || 1), uy = Math.hypot(sd.x, sd.z), uz = -sd.y * sd.z / (Math.hypot(sd.x, sd.z) || 1);
+        const sp = [cx - rx * sz - ux * sz, cy - uy * sz, cz - rz * sz - uz * sz, cx + rx * sz - ux * sz, cy - uy * sz, cz + rz * sz - uz * sz,
+          cx + rx * sz + ux * sz, cy + uy * sz, cz + rz * sz + uz * sz, cx - rx * sz + ux * sz, cy + uy * sz, cz - rz * sz + uz * sz];
+        const sg = new THREE.BufferGeometry();
+        sg.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
+        sg.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+        sg.setIndex([0, 1, 2, 0, 2, 3]);
+        this._geoms.push(sg);
+        const scol = mode === 'night' ? 0xc8d8ff : mode === 'sunset' ? 0xffb070 : 0xfff0c8;
+        const sm = new THREE.MeshBasicMaterial({ map: stex, color: scol, transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
+        this._mats.push(sm);
+        const sun = new THREE.Mesh(sg, sm);
+        sun.renderOrder = -996;
+        this._follow(sun);
+        this._add(sun);
+        this._anim.sunDisc = sun;
+      }
     }
 
     _roadColors() {
@@ -823,7 +987,7 @@
 
     _buildRoad(def) {
       const N = this.N, ds = this.ds, star = this.theme === 'starlight';
-      const rc = this._roadColors(), road = new Batch(), hwA = this.hw;
+      const rc = this._roadColors(), road = new Batch(true), hwA = this.hw;
       const white = [1, 1, 1];
       const ice = this.theme === 'glacier' && def.builtinScenery ? { c: col(0xa9d9ff), c2: col(0x92c9f2) } : null;
       let iceD0 = 0, iceD1 = 0;
@@ -831,40 +995,73 @@
         const mid = this._dist(def.lakeDist), half = (def.iceLen || 100) / 2;
         iceD0 = mid - half; iceD1 = mid + half;
       }
-      const lat = (h, c) => (c === 0 ? -h : c === 1 ? -h + 1.3 : c === 2 ? -0.3 : c === 3 ? 0.3 : c === 4 ? h - 1.3 : h);
+      // ---- cross-section: 15 columns (curb, bevel, gap, edge line, asphalt, tire band, asphalt, centre, mirrored)
+      const KIND = ['curb', 'slope', 'gap', 'line', 'asph', 'tire', 'asph', 'center', 'asph', 'tire', 'asph', 'line', 'gap', 'slope', 'curb'];
+      const DYL = [0.075, 0.075, 0.02, 0.028, 0.02, 0.02, 0.02, 0.026, 0.02, 0.02, 0.02, 0.028, 0.02, 0.02, 0.075];
+      const DYR = [0.075, 0.02, 0.02, 0.028, 0.02, 0.02, 0.02, 0.026, 0.02, 0.02, 0.02, 0.028, 0.02, 0.075, 0.075];
+      const NC = KIND.length, TW = 6, GAIN = 1.18;
+      const bnd = (h, o) => {
+        const tb = 0.45 * h;
+        o[0] = -h; o[1] = -h + 0.5; o[2] = -h + 1.1; o[3] = -h + 1.35; o[4] = -h + 1.65; o[5] = -tb - 0.9; o[6] = -tb + 0.9; o[7] = -0.15;
+        o[8] = 0.15; o[9] = tb - 0.9; o[10] = tb + 0.9; o[11] = h - 1.65; o[12] = h - 1.35; o[13] = h - 1.1; o[14] = h - 0.5; o[15] = h;
+      };
+      const bi = new Float32Array(NC + 1), bj = new Float32Array(NC + 1);
+      const paint = (c, k) => [c[0] * k, c[1] * k, c[2] * k];
       for (let i = 0; i < N; i += 2) {
-        const j = i + 2 >= N ? 0 : i + 2, r = i >> 1, d = i * ds;
+        const j = i + 2 >= N ? 0 : i + 2, r = i >> 1, d = i * ds, d2 = (i + 2) * ds;
         const hi = hwA[i], hj = hwA[j];
+        const vi = d / TW, vj = d2 / TW;
         if (i < 4) {
           // start / finish checkerboard
           const nc = Math.max(4, Math.round((2 * hi) / 2.2));
           for (let c = 0; c < nc; c++) {
             const l0i = -hi + (c * 2 * hi) / nc, l1i = -hi + ((c + 1) * 2 * hi) / nc;
             const l0j = -hj + (c * 2 * hj) / nc, l1j = -hj + ((c + 1) * 2 * hj) / nc;
-            const k = ((r + c) & 1) ? [0.08, 0.08, 0.08] : [0.98, 0.98, 0.98];
-            road.quad(this._P(i, l0i, 0.04), this._P(i, l1i, 0.04), this._P(j, l1j, 0.04), this._P(j, l0j, 0.04), k);
+            const k = ((r + c) & 1) ? [0.1, 0.1, 0.1] : [1.1, 1.1, 1.1];
+            road.quadUV(this._P(i, l0i, 0.04), this._P(i, l1i, 0.04), this._P(j, l1j, 0.04), this._P(j, l0j, 0.04), k,
+              [l0i / TW, vi, l1i / TW, vi, l1j / TW, vj, l0j / TW, vj]);
           }
           continue;
         }
-        const stripe = (r >> 2) & 1, dash = ((r >> 1) & 1) === 0, curbT = (r >> 1) & 1;
+        bnd(hi, bi); bnd(hj, bj);
+        const stripe = (r >> 2) & 1, dash = ((r >> 1) & 1) === 0, curbT = r & 1;
         const inIce = ice && d > iceD0 && d < iceD1;
-        for (let c = 0; c < 5; c++) {
-          let k, dy = 0.02;
+        const streak = 0.9 + 0.04 * hash2(r, 3.7);
+        for (let c = 0; c < NC; c++) {
+          const kind = KIND[c];
+          let k;
           if (star) {
             const hue = d * 0.0022 + c * 0.07;
-            if (c === 0 || c === 4) { k = curbT ? [1, 1, 1] : hsl(hue, 1, 0.75); dy = 0.05; }
-            else if (c === 2) k = dash ? [1, 1, 1] : hsl(hue, 0.9, 0.55);
+            if (kind === 'curb' || kind === 'slope') k = curbT ? [1, 1, 1] : hsl(hue, 1, 0.75);
+            else if (kind === 'line') k = [1, 1, 1];
+            else if (kind === 'center') k = dash ? [1, 1, 1] : hsl(hue, 0.9, 0.55);
             else k = hsl(hue, 0.9, stripe ? 0.5 : 0.56);
-          } else if (c === 0 || c === 4) { k = curbT ? rc.c1 : rc.c0; dy = 0.05; }
-          else if (c === 2) k = dash ? white : (inIce ? ice.c : (stripe ? rc.a : rc.b));
-          else k = inIce ? (stripe ? ice.c : ice.c2) : (stripe ? rc.a : rc.b);
-          road.quad(this._P(i, lat(hi, c), dy), this._P(i, lat(hi, c + 1), dy), this._P(j, lat(hj, c + 1), dy), this._P(j, lat(hj, c), dy), k);
+          } else {
+            const base = inIce ? (stripe ? ice.c : ice.c2) : (stripe ? rc.a : rc.b);
+            if (kind === 'curb') k = paint(curbT ? rc.c1 : rc.c0, GAIN);
+            else if (kind === 'slope') k = paint(curbT ? rc.c1 : rc.c0, 0.8);
+            else if (kind === 'line') k = [1.12, 1.12, 1.12];
+            else if (kind === 'center') k = dash ? [1.12, 1.12, 1.12] : base;
+            else if (kind === 'tire') k = inIce ? base : paint(base, streak);
+            else k = base;
+          }
+          const l0i = bi[c], l1i = bi[c + 1], l0j = bj[c], l1j = bj[c + 1];
+          road.quadUV(this._P(i, l0i, DYL[c]), this._P(i, l1i, DYR[c]), this._P(j, l1j, DYR[c]), this._P(j, l0j, DYL[c]), k,
+            [l0i / TW, vi, l1i / TW, vi, l1j / TW, vj, l0j / TW, vj]);
+        }
+        if (!star) {
+          // vertical curb lips down to the shoulder (darker)
+          const lip = paint(curbT ? rc.c1 : rc.c0, 0.65);
+          for (let s = 0; s < 2; s++) {
+            const li = s ? bi[NC] : bi[0], lj = s ? bj[NC] : bj[0], u = li / TW, u2 = lj / TW;
+            road.quadUV(this._P(i, li, -0.01), this._P(i, li, 0.075), this._P(j, lj, 0.075), this._P(j, lj, -0.01), lip, [u, vi, u, vi, u2, vj, u2, vj]);
+          }
         }
         if (star) {
           // slab underside & edges
-          const dk = (r & 1) ? col(0x4a2a9a) : col(0x6a3cc8), bk = col(0x1c0d44);
-          for (let s = -1; s <= 1; s += 2) road.quad(this._P(i, s * hi, 0), this._P(i, s * hi, -0.9), this._P(j, s * hj, -0.9), this._P(j, s * hj, 0), dk);
-          road.quad(this._P(i, -hi, -0.9), this._P(i, hi, -0.9), this._P(j, hj, -0.9), this._P(j, -hj, -0.9), bk);
+          const dk = (r & 1) ? col(0x4a2a9a) : col(0x6a3cc8), bk = col(0x1c0d44), z8 = [0, 0, 0, 0, 0, 0, 0, 0];
+          for (let s = -1; s <= 1; s += 2) road.quadUV(this._P(i, s * hi, 0), this._P(i, s * hi, -0.9), this._P(j, s * hj, -0.9), this._P(j, s * hj, 0), dk, z8);
+          road.quadUV(this._P(i, -hi, -0.9), this._P(i, hi, -0.9), this._P(j, hj, -0.9), this._P(j, -hj, -0.9), bk, z8);
         }
       }
       // glowing guard rails on the outside of sharper corners (starlight only)
@@ -879,7 +1076,9 @@
           road.quad(this._P(i, a1, 1.0), this._P(i, a1, 0.05), this._P(j, b1, 0.05), this._P(j, b1, 1.0), cc);
         }
       }
-      this.roadMesh = this._mesh(road, this._mat({}, star), true);
+      const roadTex = star ? null : asphaltTex();
+      this.roadMesh = this._mesh(road, this._mat(roadTex ? { map: roadTex } : {}, star), true);
+      if (this.roadMesh) this.roadMesh.receiveShadow = true;
 
       // boost pads & jump ramps (flat decals just above the road)
       const pad = new Batch();
@@ -937,6 +1136,7 @@
         }
       }
       this.shoulderMesh = this._mesh(g, this._mat({}, false), true);
+      if (this.shoulderMesh) this.shoulderMesh.receiveShadow = true;
 
       // walls / fences
       const w = new Batch();
@@ -974,6 +1174,7 @@
         }
       }
       this.wallMesh = this._mesh(w, this._mat({}, false), true);
+      if (this.wallMesh) this.wallMesh.receiveShadow = true;
     }
 
     _buildGround() {
@@ -981,8 +1182,10 @@
       geo.rotateX(-Math.PI / 2);
       this._geoms.push(geo);
       const mat = new THREE.MeshLambertMaterial({ color: this.cfg.ground });
+      this._detail(mat, { scale: 0.22, strength: 0.4, macro: 0.25 });
       this._mats.push(mat);
       const m = new THREE.Mesh(geo, mat);
+      m.receiveShadow = true;
       m.position.set(this.px[0], this.groundY, this.pz[0]);
       m.frustumCulled = false;
       this.ground = this._add(m);
@@ -1039,6 +1242,121 @@
       }
     }
 
+    // ------------------------------------------------ scenery helpers (also exposed through the kit)
+    // GameCube-style smooth tree into a Batch. kind: 'round' | 'pine' | 'palm' | 'snowpine'; o = {leaf, leaf2, trunk} colours (hex)
+    _tree(b, x, y, z, s, kind, o) {
+      s = s || 1; o = o || {};
+      const h = hash2(x, z), g = 0.9 + h * 0.2, jc = (c) => mul(c, g);
+      const trunk = col(o.trunk !== undefined ? o.trunk : 0x7a4f2a);
+      if (kind === 'pine' || kind === 'snowpine') {
+        const base = col(o.leaf !== undefined ? o.leaf : kind === 'pine' ? 0x2f8f46 : 0x1f6b57), snow = [1, 1, 1];
+        b.frustum(x, y, z, 0.3 * s, 0.22 * s, 1.8 * s, 7, trunk, 0);
+        for (let k = 0; k < 4; k++) {
+          const r0 = (2.5 - k * 0.5) * s, hh = (2.3 - k * 0.15) * s, yy = y + (1.0 + k * 1.3) * s, c = mul(base, 0.85 + k * 0.08);
+          b.frustum(x, yy, z, r0, 0.05 * s, hh, 9, jc(c), h * 6);
+          if (kind === 'snowpine') b.frustum(x, yy + hh * 0.38, z, r0 * 0.62, 0.03 * s, hh * 0.62, 9, snow, h * 6);
+        }
+        b.blob(x, y + 6.05 * s, z, 0.28 * s, 0.4 * s, 0.28 * s, kind === 'snowpine' ? snow : jc(mul(base, 1.25)), 0);
+      } else if (kind === 'palm') {
+        const lean = (h - 0.5) * 2.4 * s, ang = h * 40, H = 5.6 * s, segs = 6, ca = Math.cos(ang), sa = Math.sin(ang);
+        const tc = [col(0x9a6f3f), col(0x86592f)];
+        let tx = x, tz = z;
+        for (let k = 0; k < segs; k++) {
+          const t0 = k / segs, t1 = (k + 1) / segs, ox0 = lean * t0 * t0, ox1 = lean * t1 * t1;
+          b.frustum(x + ca * ox0, y + H * t0, z + sa * ox0, (0.3 - 0.13 * t0) * s, (0.3 - 0.13 * t1) * s, H / segs + 0.06 * s, 6, tc[k & 1], 0);
+          tx = x + ca * ox1; tz = z + sa * ox1;
+        }
+        const top = y + H, leaf = col(o.leaf !== undefined ? o.leaf : 0x3fae4a), leaf2 = col(o.leaf2 !== undefined ? o.leaf2 : 0x2d8f3e);
+        for (let k = 0; k < 8; k++) {
+          const a = (k / 8) * Math.PI * 2 + h * 3, dx = Math.cos(a), dz = Math.sin(a), px = -dz, pz = dx, w = 0.5 * s;
+          const T = [tx, top, tz], M = [tx + dx * 2.0 * s, top + 0.75 * s, tz + dz * 2.0 * s], E = [tx + dx * 3.6 * s, top - 0.9 * s, tz + dz * 3.6 * s];
+          const Ml = [M[0] + px * w, M[1], M[2] + pz * w], Mr = [M[0] - px * w, M[1], M[2] - pz * w];
+          const c = jc(k & 1 ? leaf : leaf2);
+          b.tri(T, Ml, Mr, c); b.tri(Ml, E, Mr, c);
+        }
+        b.blob(tx + 0.25 * s, top - 0.25 * s, tz, 0.26 * s, 0.26 * s, 0.26 * s, col(0x6b4a2a), 0);
+        b.blob(tx - 0.2 * s, top - 0.3 * s, tz + 0.2 * s, 0.24 * s, 0.24 * s, 0.24 * s, col(0x6b4a2a), 0);
+      } else {
+        const l1 = col(o.leaf !== undefined ? o.leaf : 0x45b24a), l2 = col(o.leaf2 !== undefined ? o.leaf2 : 0x5cc65a);
+        b.frustum(x, y, z, 0.34 * s, 0.2 * s, 2.7 * s, 7, trunk, 0);
+        b.blob(x, y + 3.5 * s, z, 2.3 * s, 1.95 * s, 2.3 * s, jc(l1), 1);
+        b.blob(x + 1.1 * s, y + 3.0 * s, z + 0.4 * s, 1.5 * s, 1.35 * s, 1.5 * s, jc(mix(l1, l2, 0.4)), 0);
+        b.blob(x - 1.0 * s, y + 3.2 * s, z - 0.5 * s, 1.5 * s, 1.35 * s, 1.5 * s, jc(mix(l1, l2, 0.4)), 0);
+        b.blob(x + 0.1 * s, y + 4.7 * s, z - 0.1 * s, 1.55 * s, 1.2 * s, 1.55 * s, jc(l2), 1);
+      }
+    }
+
+    // animated GameCube water plane (G.GFX.water when available). o: {x,y,z, radius | w,d, color, deep, opacity, segs}
+    _water(o) {
+      o = o || {};
+      const geo = o.radius ? new THREE.CircleGeometry(o.radius, o.segs || 48) : new THREE.PlaneGeometry(o.w || 100, o.d || 100, 1, 1);
+      geo.rotateX(-Math.PI / 2); this._geoms.push(geo);
+      let mat;
+      if (G.GFX && G.GFX.water) {
+        mat = G.GFX.water({ color: o.color !== undefined ? o.color : 0x3aa7e0, deep: o.deep, opacity: o.opacity !== undefined ? o.opacity : 0.9 });
+      } else {
+        mat = new THREE.MeshPhongMaterial({ color: o.color !== undefined ? o.color : 0x3aa7e0, shininess: 90, specular: 0xffffff, transparent: true, opacity: o.opacity !== undefined ? o.opacity : 0.88 });
+      }
+      this._mats.push(mat);
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(o.x || 0, o.y !== undefined ? o.y : this.groundY + 0.08, o.z || 0);
+      return this._add(m);
+    }
+
+    // one InstancedMesh of grass tufts / flowers scattered along the road edges. Offsets are measured from the
+    // road edge (hw): the shoulder + embankment follow the road height down to groundY.
+    // o = { colors:[hex], flowerColors:[hex], flowers:0..1, scale:[min,max], height, skipWalls }
+    _tufts(count, off0, off1, o) {
+      o = o || {};
+      const N = this.N, rng = this.rng, sh = this.shoulder, gy = this.groundY;
+      off0 = off0 === undefined ? 0.4 : off0; off1 = off1 === undefined ? sh + EMB : off1;
+      // geometry: 6 crossed blades + a tiny bloom, vertex colour is a neutral gradient tinted per instance
+      const P = [], Cc = [], Nn = [];
+      const H = o.height || 0.55, W = 0.09;
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI + k * 0.4, ca = Math.cos(a), sa = Math.sin(a), lean = (k % 2 ? 1 : -1) * 0.12, hh = H * (0.7 + 0.3 * ((k * 37) % 5) / 4);
+        P.push(-W * ca, 0, -W * sa, W * ca, 0, W * sa, lean * ca * 2, hh, lean * sa * 2);
+        Cc.push(0.55, 0.62, 0.5, 0.55, 0.62, 0.5, 1, 1, 0.9);
+        Nn.push(0, 1, 0, 0, 1, 0, 0, 1, 0);
+      }
+      const ico = icoPositions(0), br = 0.1;
+      for (let i = 0; i < ico.length; i += 3) { P.push(ico[i] * br, H * 0.95 + ico[i + 1] * br, ico[i + 2] * br); Cc.push(1.15, 1.15, 1.15); Nn.push(0, 1, 0); }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(Cc, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(Nn, 3));
+      this._geoms.push(geo);
+      const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+      this._mats.push(mat);
+      const mesh = new THREE.InstancedMesh(geo, mat, count);
+      const greens = (o.colors || [0x4fb04a, 0x66c457, 0x3f9e44, 0x7ad060]).map(col);
+      const fl = (o.flowerColors || [0xff5a6a, 0xffe14a, 0xffffff, 0xff9ae0, 0xb08cff]).map(col);
+      const fr = o.flowers === undefined ? 0.3 : o.flowers, sMin = (o.scale || [0.8, 1.6])[0], sMax = (o.scale || [0.8, 1.6])[1];
+      const dummy = new THREE.Object3D(), cc = new THREE.Color();
+      const wallOn = !this.noWalls && o.skipWalls !== false && (this.def.walls || 'x') !== 'none';
+      let placed = 0, tries = 0;
+      while (placed < count && tries < count * 6) {
+        tries++;
+        const i = (rng() * N) | 0, side = rng() < 0.5 ? -1 : 1, e = off0 + rng() * (off1 - off0);
+        if (wallOn && e > sh - 0.2 && e < sh + 2.1) continue;
+        const l = side * (this.hw[i] + e), below = e - sh;
+        const yy = below <= 0 ? this.py[i] - 0.01 : below >= EMB ? gy : this.py[i] - 0.01 + (gy - this.py[i] + 0.01) * (below / EMB);
+        const x = this.px[i] + this.rx[i] * l, z = this.pz[i] + this.rz[i] * l;
+        if (below >= EMB && !this.clear(x, z, this.hw[i] + sh + EMB - 0.5)) continue;
+        const c = rng() < fr ? fl[(rng() * fl.length) | 0] : greens[(rng() * greens.length) | 0], sc = sMin + rng() * (sMax - sMin);
+        dummy.position.set(x, yy, z); dummy.rotation.set(0, rng() * 6.28, 0); dummy.scale.set(sc, sc * (0.8 + rng() * 0.5), sc);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(placed, dummy.matrix); cc.setRGB(c[0], c[1], c[2]); mesh.setColorAt(placed, cc);
+        placed++;
+      }
+      mesh.count = placed;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      mesh.frustumCulled = false;
+      mesh.receiveShadow = true;
+      return this._add(mesh);
+    }
+
     _buildScenery(def, lake) {
       const theme = this.theme, gy = this.groundY, b = new Batch();
       const marginTree = this.shoulder + 15 + EMB * 0.5;   // from centerline: hw ~13 + shoulder + embankment
@@ -1047,20 +1365,12 @@
       const jit = (c, r) => mul(c, 0.88 + r() * 0.24);
 
       if (theme === 'meadow') {
-        this._scatter(260, 2, 70, m0, (x, z, i, r) => {
-          const s = 0.8 + r() * 0.8;
-          if (r() < 0.35) {
-            b.box(x, gy, z, 0.5 * s, 2.0 * s, 0.5 * s, r() * 3, col(0x7a4f2a));
-            for (let k = 0; k < 3; k++) b.frustum(x, gy + (1.6 + k * 1.7) * s, z, (2.5 - k * 0.7) * s, 0, 2.6 * s, 7, jit(col(0x2f8f46), r), r());
-          } else {
-            b.box(x, gy, z, 0.6 * s, 2.4 * s, 0.6 * s, r() * 3, col(0x7a4f2a));
-            b.blob(x, gy + 3.7 * s, z, 2.6 * s, 2.3 * s, 2.6 * s, jit(col(0x45b24a), r), 0);
-            b.blob(x + 1.1 * s, gy + 3.1 * s, z + 0.5 * s, 1.6 * s, 1.5 * s, 1.6 * s, jit(col(0x58c25a), r), 0);
-          }
+        this._scatter(240, 2, 70, m0, (x, z, i, r) => {
+          const s = 0.85 + r() * 0.8;
+          this._tree(b, x, gy, z, s, r() < 0.3 ? 'pine' : 'round');
         });
         this._scatter(120, 1, 45, m0 - 4, (x, z, i, r) => b.blob(x, gy + 0.5, z, 1.2 + r(), 0.9 + r() * 0.5, 1.2 + r(), jit(col(0x3f9f45), r), 0));
-        const fl = [col(0xff5a6a), col(0xffe14a), col(0xffffff), col(0xff9ae0)];
-        this._scatter(260, 1, 50, m0 - 3, (x, z, i, r) => b.box(x, gy, z, 0.35, 0.5 + r() * 0.3, 0.35, r() * 3, fl[(r() * 4) | 0]));
+        this._tufts(700, 0.4, this.shoulder + EMB + 12, { flowers: 0.35 });
         this._farScatter(26, 100, (x, z, r) => {
           const s = 25 + r() * 35;
           b.blob(x, gy - 4, z, s * 1.3, s * 0.55, s, jit(col(0x69b848), r), 1);
@@ -1075,6 +1385,8 @@
           b.box(x + side * 0.7 * s, gy + 1.5 * s, z, 0.9 * s, 0.4 * s, 0.4 * s, 0, c);
           b.box(x + side * 1.05 * s, gy + 1.5 * s, z, 0.4 * s, 1.3 * s, 0.4 * s, 0, c);
         });
+        this._scatter(34, 3, 50, m0, (x, z, i, r) => this._tree(b, x, gy, z, 0.9 + r() * 0.6, 'palm'));
+        this._tufts(320, 0.4, this.shoulder + EMB + 10, { colors: [0xb8a24a, 0x9aa04a, 0xc8b060, 0x8f9a45], flowers: 0.08, flowerColors: [0xffd36f, 0xff8a5a], scale: [0.7, 1.3] });
         this._scatter(110, 2, 70, m0 - 3, (x, z, i, r) => {
           const s = 0.8 + r() * 2.2;
           b.blob(x, gy + 0.3 * s, z, 1.6 * s, 1.0 * s, 1.3 * s, jit(r() < 0.5 ? col(0xb9885a) : col(0x9d7a5a), r), 0);
@@ -1112,15 +1424,7 @@
         });
       } else if (theme === 'glacier') {
         const snowTop = col(0xffffff);
-        this._scatter(250, 2, 70, m0, (x, z, i, r) => {
-          const s = 0.8 + r() * 1.0;
-          b.box(x, gy, z, 0.5 * s, 1.5 * s, 0.5 * s, 0, col(0x5a3d2a));
-          for (let k = 0; k < 3; k++) {
-            const r0 = (2.6 - k * 0.7) * s, hh = 2.8 * s, yy = gy + (1.3 + k * 1.8) * s;
-            b.frustum(x, yy, z, r0, 0, hh, 7, jit(col(0x1f6b57), r), r());
-            b.frustum(x, yy + hh * 0.38, z, r0 * 0.62, 0, hh * 0.62, 7, snowTop, 0);
-          }
-        });
+        this._scatter(230, 2, 70, m0, (x, z, i, r) => this._tree(b, x, gy, z, 0.85 + r() * 1.0, 'snowpine'));
         this._scatter(90, 1, 60, m0 - 3, (x, z, i, r) => {
           const s = 0.8 + r() * 2.2;
           b.blob(x, gy + 0.3 * s, z, 1.7 * s, 1.2 * s, 1.5 * s, jit(col(0xbfe6ff), r), 0);
@@ -1139,14 +1443,7 @@
           const s = 25 + r() * 35;
           b.blob(x, gy - 4, z, s * 1.3, s * 0.5, s, mix(col(0xf2f9ff), col(0xd8ebf8), r()), 1);
         });
-        if (lake) {
-          const geo = new THREE.CircleGeometry(lake.r, 40); geo.rotateX(-Math.PI / 2); this._geoms.push(geo);
-          const mat = new THREE.MeshPhongMaterial({ color: 0x9fd8ff, shininess: 120, specular: 0xffffff, flatShading: true, transparent: true, opacity: 0.92 });
-          this._mats.push(mat);
-          const m = new THREE.Mesh(geo, mat);
-          m.position.set(lake.x, gy + 0.08, lake.z);
-          this._anim.water = this._add(m);
-        }
+        if (lake) this._anim.water = this._water({ x: lake.x, y: gy + 0.08, z: lake.z, radius: lake.r, color: 0x9fd8ff, opacity: 0.92 });
       } else {
         // starlight: floating rocks and crystals around the ribbon
         const rng = this.rng, cs = [col(0xff7ab8), col(0x6fd8ff), col(0xffd36f), col(0xa98bff), col(0x8cffc0)];
@@ -1178,15 +1475,11 @@
       }
       const mat = this._mat({}, theme === 'starlight');
       this.sceneryMesh = this._mesh(b, mat, true);
+      if (this.sceneryMesh) this.sceneryMesh.receiveShadow = true;
 
       // meadow lake
       if (theme === 'meadow' && lake) {
-        const geo = new THREE.CircleGeometry(lake.r, 40); geo.rotateX(-Math.PI / 2); this._geoms.push(geo);
-        const m2 = new THREE.MeshPhongMaterial({ color: 0x3aa7e0, shininess: 90, specular: 0xffffff, flatShading: true, transparent: true, opacity: 0.88 });
-        this._mats.push(m2);
-        const m = new THREE.Mesh(geo, m2);
-        m.position.set(lake.x, gy + 0.08, lake.z);
-        this._anim.water = this._add(m);
+        this._anim.water = this._water({ x: lake.x, y: gy + 0.08, z: lake.z, radius: lake.r, color: 0x3aa7e0, opacity: 0.88 });
         // shore ring + reeds
         const sb = new Batch(), rng = this.rng;
         for (let a = 0; a < 26; a++) {
@@ -1233,7 +1526,17 @@
         N: this.N, ds: this.ds, px: this.px, py: this.py, pz: this.pz, hw: this.hw, curv: this.curv,
         at(d, l, dy) { return self._PD(d, l || 0, dy || 0); },
         frame(d) { const f = self._frame(d, {}); return f; },
-        mesh(batch, matOpts, basic) { return self._mesh(batch, self._mat(matOpts || {}, !!basic), true); },
+        frameInto(d, out) { return self._frame(d, out); },
+        tree(batch, x, y, z, scale, kind, o) { self._tree(batch, x, y, z, scale, kind, o); },
+        water(o) { return self._water(o); },
+        grassTufts(count, off0, off1, o) { return self._tufts(count, off0, off1, o); },
+        shiny(opts) {
+          const m = G.GFX && G.GFX.shiny ? G.GFX.shiny(opts || {}) : new THREE.MeshPhongMaterial(Object.assign({ shininess: 60, specular: 0x444444 }, opts || {}));
+          self._mats.push(m); return m;
+        },
+        detail(mat, o) { return self._detail(mat, o); },
+        skyMode: self.skyMode,
+        mesh(batch, matOpts, basic) { const m = self._mesh(batch, self._mat(matOpts || {}, !!basic), true); if (m) m.receiveShadow = true; return m; },
         mat(opts, basic) { return self._mat(opts || {}, !!basic); },
         add(o) { return self._add(o); },
         trackGeom(g) { self._geoms.push(g); return g; },
@@ -1297,8 +1600,7 @@
       const w = this._anim.water;
       if (w) {
         w.position.y = this.groundY + 0.08 + Math.sin(time * 1.3) * 0.03;
-        w.material.opacity = 0.86 + Math.sin(time * 0.9) * 0.04;
-        const s = 1 + Math.sin(time * 0.7) * 0.004; w.scale.set(s, 1, s);
+        if (!w.material.isShaderMaterial) w.material.opacity = 0.86 + Math.sin(time * 0.9) * 0.04;
       }
     }
 

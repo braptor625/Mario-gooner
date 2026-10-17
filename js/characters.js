@@ -131,37 +131,46 @@
     return g;
   }
 
+  let curLod = 1; // global level-of-detail factor used while building (auto-lowered to hit triangle budgets)
   function sphSegs(sz) {
-    return sz > 0.45 ? [22, 16] : sz > 0.25 ? [18, 13] : sz > 0.13 ? [13, 9] : sz > 0.065 ? [10, 7] : [7, 5];
+    if (sz > 0.29) return curLod >= 0.65 ? [16, 12] : curLod >= 0.5 ? [14, 10] : [12, 8];
+    sz *= curLod;
+    return sz > 0.1 ? [11, 8] : sz > 0.055 ? [8, 6] : [6, 4];
   }
 
   function baseGeo(t, a, sc) {
     const mx = Math.max(sc[0], sc[1], sc[2]);
     let key, g;
     if (t === 'sph') {
-      const sg = sphSegs(a[0] * mx * (G.GFX_LOD || 1));
+      const sg = sphSegs(a[0] * mx);
       key = 's:' + a[0] + ',' + sg;
       if (geoCache[key]) return geoCache[key];
       g = new THREE.SphereGeometry(a[0], sg[0], sg[1]);
     } else if (t === 'box') {
       const dims = [a[0] * sc[0], a[1] * sc[1], a[2] * sc[2]];
       const mn = Math.min(dims[0], dims[1], dims[2]), mxd = Math.max(dims[0], dims[1], dims[2]);
-      const hard = mxd >= 0.55 && mn >= 0.09;
+      const hard = mxd * curLod >= 0.95 && mn >= 0.09;
       const rr = a[3] !== undefined ? a[3] : Math.min(0.14, mn * 0.42);
       key = 'b:' + a.join(',') + (hard ? 'h' : 's') + rr;
       if (geoCache[key]) return geoCache[key];
       g = rboxGeo(a[0], a[1], a[2], rr / Math.max(1e-3, 1), hard);
     } else if (t === 'cyl') {
-      const seg = a[0] * mx > 0.18 ? 18 : a[0] * mx > 0.07 ? 12 : 8;
-      key = 'c:' + a.slice(0, 3).join(',') + ',' + seg;
+      const rs = Math.max(a[0], a[1]) * mx * curLod;
+      const seg = rs > 0.2 ? 16 : rs > 0.055 ? 12 : 8;
+      key = 'c:' + a.slice(0, 3).join(',') + ',' + seg + (a[4] || '');
       if (geoCache[key]) return geoCache[key];
-      g = new THREE.CylinderGeometry(a[0], a[1], a[2], seg, 1);
+      g = new THREE.CylinderGeometry(a[0], a[1], a[2], seg, 1, a[4] === 'o');
+    } else if (t === 'disc') {
+      key = 'd:' + a.join(',');
+      if (geoCache[key]) return geoCache[key];
+      g = new THREE.CircleGeometry(a[0], a[1] || 10);
     } else if (t === 'tor') {
       key = 't:' + a.join(',');
       if (geoCache[key]) return geoCache[key];
       g = new THREE.TorusGeometry(a[0], a[1], a[2] || 8, a[3] || 16);
     } else {
-      const seg = a[0] * mx > 0.12 ? 14 : a[0] * mx > 0.05 ? 9 : 6;
+      const cs = a[0] * mx * curLod;
+      const seg = cs > 0.12 ? 12 : cs > 0.05 ? 8 : 6;
       key = 'k:' + a[0] + ',' + a[1] + ',' + seg;
       if (geoCache[key]) return geoCache[key];
       g = new THREE.ConeGeometry(a[0], a[1], seg, 1);
@@ -221,7 +230,7 @@
   let sharedMat = null;
   function mat() {
     if (sharedMat) return sharedMat;
-    sharedMat = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 46, specular: 0x4a4a4a });
+    sharedMat = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 34, specular: 0x2c2c2c });
     if (G.GFX && G.GFX.patchRim) { try { G.GFX.patchRim(sharedMat, { color: 0xfff1dc, strength: 0.3, power: 2.4 }); } catch (e) {} }
     return sharedMat;
   }
@@ -241,15 +250,16 @@
   };
   let irisCol = 0x4a8ae0;
 
-  // proper eyes: white sclera, coloured iris, pupil, glint
+  // proper eyes: white sclera bulge + coloured iris, pupil and glint (flat discs, very cheap)
   function eyes(h, x, y, z, r) {
     const R = r * 1.5;
     for (const sd of [-1, 1]) {
-      const ex = sd * x;
-      h.push(P('sph', [R], WHITE, [ex, y, z - R * 0.28], [1, 1.2, 0.72]));
-      h.push(P('sph', [R * 0.78], irisCol, [ex - sd * R * 0.08, y - R * 0.04, z + R * 0.14], [1, 1.12, 0.42]));
-      h.push(P('sph', [R * 0.44], 0x120f18, [ex - sd * R * 0.08, y - R * 0.05, z + R * 0.24], [1, 1.1, 0.4]));
-      h.push(P('sph', [R * 0.2], WHITE, [ex - sd * R * 0.3, y + R * 0.3, z + R * 0.33], [1, 1, 0.5]));
+      const ex = sd * x, fz = z - R * 0.28 + R * 0.5 * 0.97; // front of the sclera bulge
+      const ix = ex - sd * R * 0.06;
+      h.push(P('sph', [R], WHITE, [ex, y, z - R * 0.28], [1, 1.2, 0.5]));
+      h.push(P('disc', [R * 0.66, 12], irisCol, [ix, y - R * 0.04, fz + 0.004], [1, 1.16, 1]));
+      h.push(P('disc', [R * 0.38, 10], 0x120f18, [ix, y - R * 0.05, fz + 0.008], [1, 1.12, 1]));
+      h.push(P('disc', [R * 0.2, 8], WHITE, [ix - sd * R * 0.2, y + R * 0.28, fz + 0.012]));
     }
   }
 
@@ -265,12 +275,10 @@
       const k = big || 1;
       for (const sd of [-1, 1]) {
         b.push(P('cyl', [0.078 * k, 0.07 * k, 0.44, 10], armCol, [sd * 0.32 * k, 0.32, 0.2], [1, 1, 1], [HP + 0.35, 0, 0]));
-        b.push(P('sph', [0.1 * k], armCol, [sd * 0.32 * k, 0.38, 0.0]));
-        b.push(P('cyl', [0.098 * k, 0.098 * k, 0.07, 10], shade(armCol, 1.28), [sd * 0.32 * k, 0.3, 0.37], [1, 1, 1], [HP + 0.35, 0, 0])); // cuff
+        b.push(P('cyl', [0.098 * k, 0.098 * k, 0.07, 10, 'o'], shade(armCol, 1.28), [sd * 0.32 * k, 0.3, 0.37], [1, 1, 1], [HP + 0.35, 0, 0])); // cuff
         b.push(P('sph', [0.118 * k], handCol, [sd * 0.32 * k, 0.27, 0.44])); // glove / hand
         b.push(P('cyl', [0.09, 0.085, 0.42, 10], legCol, [sd * 0.14, 0.04, 0.27], [1, 1, 1], [HP, 0, 0]));
         b.push(P('sph', [0.115], footCol, [sd * 0.14, -0.035, 0.52], [1, 0.72, 1.45])); // shoe
-        b.push(P('sph', [0.1], shade(footCol, 1.35), [sd * 0.14, -0.015, 0.6], [0.85, 0.6, 0.7])); // toe cap
       }
     };
     switch (id) {
@@ -686,9 +694,8 @@
     if (NOSE[id]) h.push(P('sph', [0.05], shade(c.skin, 0.9).lerp(new THREE.Color(0xff8a7a), 0.25), [0, -0.045, surfZ(-0.045) + 0.005], [1, 0.85, 0.8]));
     if (MOUTH[id]) {
       const my = id === 'nib' ? -0.22 : id === 'krik' ? -0.2 : -0.135, mz = surfZ(my) - 0.012;
-      h.push(P('sph', [0.075], 0x4a1620, [0, my, mz], [1.25, 0.62, 0.38]));
-      h.push(P('sph', [0.04], 0xff7a8a, [0, my - 0.012, mz + 0.004], [1.2, 0.5, 0.3]));
-      h.push(P('sph', [0.058], 0xffffff, [0, my + 0.018, mz + 0.006], [1.3, 0.28, 0.22]));
+      h.push(P('sph', [0.06], 0x4a1620, [0, my, mz], [1.2, 0.55, 0.38]));
+      h.push(P('sph', [0.032], 0xff7a8a, [0, my - 0.012, mz + 0.004], [1.2, 0.5, 0.3]));
     }
     return { body: b, head: h };
   }
@@ -698,7 +705,15 @@
     let cache = riderGeoCache[ch.id];
     if (!cache) {
       const parts = riderParts(ch.id);
-      cache = riderGeoCache[ch.id] = { body: merge(parts.body), head: merge(parts.head) };
+      let bg, hg;
+      for (const l of [1, 0.8, 0.65, 0.5, 0.4, 0.3]) {
+        curLod = l;
+        bg = merge(parts.body); hg = merge(parts.head);
+        if ((bg.attributes.position.count + hg.attributes.position.count) / 3 <= RIDER_TRIS) break;
+        bg.dispose(); hg.dispose();
+      }
+      curLod = 1;
+      cache = riderGeoCache[ch.id] = { body: bg, head: hg };
     }
     const g = new THREE.Group();
     g.name = 'rider_' + ch.id;
@@ -718,23 +733,147 @@
 
   // ---------------------------------------------------------------- karts
   const WHEEL = { light: [0.32, 0.3], medium: [0.35, 0.32], heavy: [0.4, 0.4], any: [0.38, 0.36] };
+
+  // ---- shared atlases (lazy) -------------------------------------------------------------
+  let wheelTexs = null, chromeTexs = null, wheelMatC = null, chromeMatC = null;
+  function cvs(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+  function mkTex(c, nearest) {
+    const t = new THREE.CanvasTexture(c);
+    t.anisotropy = 4;
+    if (nearest) { t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; }
+    return t;
+  }
+  // wheel atlas 256x128: tread (x0-128,y0-64) | hub face (128-192, 0-64) | white (200-208,0-8). specular map: tyre dull, hub shiny.
+  function getWheelTexs() {
+    if (wheelTexs) return wheelTexs;
+    const c = cvs(256, 128), x = c.getContext('2d');
+    const s = cvs(256, 128), y = s.getContext('2d');
+    x.fillStyle = '#fff'; x.fillRect(0, 0, 256, 128);
+    y.fillStyle = '#000'; y.fillRect(0, 0, 256, 128);
+    // tread region (128x64): rubber with lug blocks across the middle band
+    x.fillStyle = '#1d1c23'; x.fillRect(0, 0, 128, 64);
+    for (let i = 0; i < 16; i++) {
+      const u = i * 8;
+      x.fillStyle = '#0e0d12'; x.fillRect(u + 1, 17, 6, 30);        // lug
+      x.fillStyle = '#34333c'; x.fillRect(u + 1, 17, 6, 3);          // lug top highlight
+      x.fillStyle = '#1f1e26'; x.fillRect(u, 12, 8, 3); x.fillRect(u, 49, 8, 3);
+    }
+    x.fillStyle = '#34333c'; x.fillRect(0, 4, 128, 3); x.fillRect(0, 57, 128, 3); // sidewall rings
+    x.fillStyle = '#2e2d35'; x.fillRect(0, 0, 128, 2); x.fillRect(0, 62, 128, 2);
+    y.fillStyle = '#161616'; y.fillRect(0, 0, 128, 64);
+    // hub face (64x64): silver disc with dark spokes
+    const cx = 160, cy = 32;
+    x.save(); x.beginPath(); x.rect(128, 0, 64, 64); x.clip();
+    x.fillStyle = '#e8ebf2'; x.fillRect(128, 0, 64, 64);
+    const g = x.createRadialGradient(cx - 6, cy - 6, 2, cx, cy, 34);
+    g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#aab0c0');
+    x.fillStyle = g; x.beginPath(); x.arc(cx, cy, 31, 0, 6.2832); x.fill();
+    x.fillStyle = '#2a2a36';
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * 6.2832 + 0.3;
+      x.beginPath(); x.moveTo(cx + Math.cos(a - 0.28) * 7, cy + Math.sin(a - 0.28) * 7);
+      x.lineTo(cx + Math.cos(a - 0.2) * 29, cy + Math.sin(a - 0.2) * 29);
+      x.lineTo(cx + Math.cos(a + 0.2) * 29, cy + Math.sin(a + 0.2) * 29);
+      x.lineTo(cx + Math.cos(a + 0.28) * 7, cy + Math.sin(a + 0.28) * 7); x.fill();
+    }
+    x.fillStyle = '#f4f6fb'; x.beginPath(); x.arc(cx, cy, 7, 0, 6.2832); x.fill();
+    x.strokeStyle = '#555a68'; x.lineWidth = 2; x.beginPath(); x.arc(cx, cy, 31, 0, 6.2832); x.stroke();
+    x.restore();
+    y.fillStyle = '#ffffff'; y.fillRect(128, 0, 64, 64);
+    y.fillStyle = '#bbbbbb'; y.fillRect(200, 0, 8, 8);
+    wheelTexs = { map: mkTex(c), spec: mkTex(s) };
+    return wheelTexs;
+  }
+  // chrome atlas 4x1: [chrome, headlamp, tail lamp, dark trim]
+  function getChromeTexs() {
+    if (chromeTexs) return chromeTexs;
+    const d = cvs(4, 1), e = cvs(4, 1), a = d.getContext('2d'), b = e.getContext('2d');
+    ['#ffffff', '#fff6d0', '#ff5a4a', '#ffffff'].forEach((col, i) => { a.fillStyle = col; a.fillRect(i, 0, 1, 1); });
+    ['#000000', '#fff0a8', '#c01810', '#000000'].forEach((col, i) => { b.fillStyle = col; b.fillRect(i, 0, 1, 1); });
+    chromeTexs = { map: mkTex(d, true), em: mkTex(e, true) };
+    return chromeTexs;
+  }
+  const UV_CHROME = [0.125, 0.5], UV_LAMP = [0.375, 0.5], UV_TAIL = [0.625, 0.5];
+
+  function wheelMat() {
+    if (wheelMatC) return wheelMatC;
+    const t = getWheelTexs();
+    if (G.GFX && G.GFX.shiny) {
+      wheelMatC = G.GFX.shiny({ vertexColors: true, map: t.map, specularMap: t.spec, reflectivity: 0.85, shininess: 70, specular: 0x666666 });
+    } else wheelMatC = new THREE.MeshPhongMaterial({ vertexColors: true, map: t.map, specularMap: t.spec, shininess: 50, specular: 0x444444 });
+    if (G.GFX && G.GFX.envMap && !wheelMatC.envMap) wheelMatC.envMap = G.GFX.envMap;
+    return wheelMatC;
+  }
+  function chromeMat() {
+    if (chromeMatC) return chromeMatC;
+    const t = getChromeTexs();
+    const o = { vertexColors: true, map: t.map, emissiveMap: t.em, emissive: 0xffffff, reflectivity: 0.8, shininess: 160, specular: 0xffffff };
+    chromeMatC = G.GFX && G.GFX.shiny ? G.GFX.shiny(o) : new THREE.MeshPhongMaterial(Object.assign({ specular: 0xffffff, shininess: 160 }, { vertexColors: true, map: t.map, emissiveMap: t.em, emissive: 0xffffff }));
+    if (G.GFX && G.GFX.envMap && !chromeMatC.envMap) chromeMatC.envMap = G.GFX.envMap;
+    return chromeMatC;
+  }
+
+  // ---- wheel: tyre (profile revolved about X, tread UV band) + hub plates (spoke texture) ----
   const wheelGeoCache = {};
-  function wheelGeo(r, w, hub) {
-    const key = r + '_' + w + '_' + hub;
+  function wheelGeo(r, w, hub, side) {
+    const key = r + '_' + w + '_' + hub + '_' + side;
     if (wheelGeoCache[key]) return wheelGeoCache[key];
-    const R = [0, 0, HP]; // cylinder axis along x
-    const parts = [
-      P('cyl', [r, r, w, 12], 0x23222b, [0, 0, 0], [1, 1, 1], R),
-      P('cyl', [r * 0.58, r * 0.58, w + 0.04, 10], hub, [0, 0, 0], [1, 1, 1], R),
-      P('box', [w + 0.08, r * 0.25, r * 0.9], shade(hub, 1.55), [0, 0, 0]),
-      P('cyl', [r * 1.02, r * 1.02, w * 0.3, 12], 0x3a3944, [0, 0, 0], [1, 1, 1], R),
-    ];
-    return (wheelGeoCache[key] = merge(parts));
+    const N = 14, pos = [], nor = [], col = [], uv = [], idx = [];
+    const white = new THREE.Color(0xffffff), hubC = new THREE.Color(hub).lerp(white, 0.35);
+    let base = 0;
+    const ring = (prof, colFn, uvFn, flip) => {
+      const n = prof.length;
+      for (let i = 0; i < n; i++) {
+        const a = prof[Math.max(0, i - 1)], b = prof[Math.min(n - 1, i + 1)];
+        let tr = b[0] - a[0], ta = b[1] - a[1];
+        const tl = Math.hypot(tr, ta) || 1; tr /= tl; ta /= tl;
+        const nr = ta * (flip ? -1 : 1), na = -tr * (flip ? -1 : 1);
+        for (let j = 0; j <= N; j++) {
+          const th = (j / N) * Math.PI * 2, cs = Math.cos(th), sn = Math.sin(th);
+          pos.push(prof[i][1], prof[i][0] * cs, prof[i][0] * sn);
+          nor.push(na, nr * cs, nr * sn);
+          const c = colFn(i); col.push(c.r, c.g, c.b);
+          const t = uvFn(i, j / N, cs, sn); uv.push(t[0], t[1]);
+        }
+      }
+      for (let i = 0; i < n - 1; i++) for (let j = 0; j < N; j++) {
+        const A = base + i * (N + 1) + j, B = A + 1, C = A + (N + 1), D = C + 1;
+        if (flip) idx.push(A, B, C, B, D, C); else idx.push(A, C, B, B, C, D);
+      }
+      base += n * (N + 1);
+    };
+    const hw = w / 2;
+    // tyre
+    const tp = [[0.6 * r, -hw], [0.92 * r, -hw], [r, -0.32 * hw], [r, 0.32 * hw], [0.92 * r, hw], [0.6 * r, hw]];
+    const tv = [0, 0.1, 0.25, 0.75, 0.9, 1];
+    ring(tp, () => white, (i, u) => [u * 0.5, 0.5 + 0.5 * tv[i]], false);
+    // hub plates (both sides)
+    for (const sd of [side]) {
+      const hp = [[0, sd * (hw + 0.05)], [0.62 * r, sd * (hw - 0.005)]];
+      ring(hp, () => hubC, (i, u, cs, sn) => { const rho = hp[i][0] / (0.62 * r); return [0.625 + cs * rho * 0.115, 0.75 + sn * rho * 0.23]; }, sd > 0);
+    }
+    // make triangle winding agree with the vertex normals
+    for (let i = 0; i < idx.length; i += 3) {
+      const a = idx[i] * 3, b = idx[i + 1] * 3, c = idx[i + 2] * 3;
+      const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+      const vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
+      const fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
+      const d = fx * (nor[a] + nor[b] + nor[c]) + fy * (nor[a + 1] + nor[b + 1] + nor[c + 1]) + fz * (nor[a + 2] + nor[b + 2] + nor[c + 2]);
+      if (d < 0) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeBoundingSphere();
+    return (wheelGeoCache[key] = g);
   }
 
   const SEAT_F = [0, 0.55, 0.2], SEAT_R = [0, 0.9, -0.55];
 
-  function pipe(x, y, z, len, col) { return P('cyl', [0.07, 0.085, len, 8], col, [x, y, z], [1, 1, 1], [HP, 0, 0]); }
+  function pipe(x, y, z, len, col) { const p = P('cyl', [0.07, 0.085, len, 8], col, [x, y, z], [1, 1, 1], [HP, 0, 0]); p.m = 'c'; return p; }
 
   // Returns { parts, exhausts:[[x,y,z]], hub }
   function kartParts(k) {
@@ -745,10 +884,13 @@
       p.push(P('box', [0.58, 0.5, 0.52], dk, [0, 0.55, -0.55]));
       p.push(P('box', [0.6, 0.1, 0.5], col, [0, 0.82, -0.55]));
       p.push(P('box', [0.6, 0.3, 0.1], col, [0, 1.0, -0.84], [1, 1, 1], [-0.15, 0, 0]));
+      p.push(P('sph', [0.1], dk, [0, 1.2, -0.9], [1.5, 0.8, 0.8])); // head rest
+      for (const sd of [-1, 1]) p.push(P('sph', [0.12], dk, [sd * 0.3, 0.5, 0.2], [0.5, 0.9, 2.0])); // side bolsters
     };
     const wheelCol = () => {
-      p.push(P('cyl', [0.2, 0.2, 0.05, 10], 0x222230, [0, 0.9, 0.62], [1, 1, 1], [1.0, 0, 0]));
-      p.push(P('cyl', [0.03, 0.03, 0.5, 5], 0x222230, [0, 0.72, 0.58], [1, 1, 1], [0.9, 0, 0]));
+      p.push(P('tor', [0.16, 0.034, 8, 18], 0x2a2a36, [0, 0.92, 0.6], [1, 1, 1], [-2.17, 0, 0]));
+      p.push(P('sph', [0.05], 0xd8dde8, [0, 0.92, 0.6]));
+      p.push(P('cyl', [0.03, 0.035, 0.5, 8], 0x2a2a36, [0, 0.72, 0.58], [1, 1, 1], [0.9, 0, 0]));
     };
     switch (k.id) {
       case 'bubble_buggy': {
@@ -1111,29 +1253,191 @@
     return { p, ex, hub: 0xffffff };
   }
 
+  // ---- per-kart decal atlas (white texel + number roundel) ----
+  const EMBLEMS = ['star', 'heart', 'bolt', 'flower', 'drop', 'leaf', 'diamond'];
+  function kartAtlas(k, idx) {
+    const c = cvs(128, 128), x = c.getContext('2d');
+    x.fillStyle = '#fff'; x.fillRect(0, 0, 128, 128);
+    const cx = 96, cy = 32;
+    const base = '#' + new THREE.Color(k.color).getHexString();
+    const dk = '#' + shade(k.color, 0.55).getHexString();
+    x.fillStyle = '#fff'; x.beginPath(); x.arc(cx, cy, 31, 0, 6.2832); x.fill();
+    x.fillStyle = dk; x.beginPath(); x.arc(cx, cy, 28, 0, 6.2832); x.fill();
+    const g = x.createRadialGradient(cx - 8, cy - 10, 2, cx, cy, 26);
+    g.addColorStop(0, '#ffffff'); g.addColorStop(0.25, '#fff4cf'); g.addColorStop(1, '#ffd23a');
+    x.fillStyle = g; x.beginPath(); x.arc(cx, cy, 24, 0, 6.2832); x.fill();
+    x.fillStyle = base; x.font = 'bold 30px Arial Black, Impact, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.lineWidth = 4; x.strokeStyle = dk; x.strokeText(String(idx), cx, cy + 2); x.fillText(String(idx), cx, cy + 2);
+    // emblem strip (bottom half): small coloured shape for rear / nose plates
+    x.fillStyle = dk; x.fillRect(0, 64, 128, 64);
+    x.fillStyle = '#fff'; x.fillRect(0, 70, 128, 4); x.fillRect(0, 118, 128, 4);
+    const em = EMBLEMS[idx % EMBLEMS.length];
+    x.fillStyle = '#fff4cf'; x.strokeStyle = base; x.lineWidth = 2;
+    x.save(); x.translate(64, 96);
+    x.beginPath();
+    if (em === 'star') { for (let i = 0; i < 10; i++) { const r = i % 2 ? 9 : 20, a = -1.5708 + i * 0.6283; x.lineTo(Math.cos(a) * r, Math.sin(a) * r); } }
+    else if (em === 'heart') { x.moveTo(0, 14); x.bezierCurveTo(-26, -2, -12, -22, 0, -8); x.bezierCurveTo(12, -22, 26, -2, 0, 14); }
+    else if (em === 'bolt') { x.moveTo(6, -22); x.lineTo(-10, 4); x.lineTo(0, 4); x.lineTo(-6, 22); x.lineTo(12, -6); x.lineTo(2, -6); }
+    else if (em === 'flower') { for (let i = 0; i < 5; i++) { const a = i * 1.2566; x.moveTo(0, 0); x.arc(Math.cos(a) * 11, Math.sin(a) * 11, 9, 0, 6.2832); } }
+    else if (em === 'drop') { x.moveTo(0, -20); x.bezierCurveTo(18, 2, 16, 18, 0, 18); x.bezierCurveTo(-16, 18, -18, 2, 0, -20); }
+    else if (em === 'leaf') { x.moveTo(-18, 14); x.bezierCurveTo(-18, -16, 6, -22, 20, -18); x.bezierCurveTo(22, 4, 6, 18, -18, 14); }
+    else { x.moveTo(0, -20); x.lineTo(16, 0); x.lineTo(0, 20); x.lineTo(-16, 0); }
+    x.closePath(); x.fill(); x.stroke(); x.restore();
+    return mkTex(c);
+  }
+  const UV_ROUNDEL = [0.75, 0.75], UV_EMBLEM = [0.5, 0.25];
+
+  const _ray = new THREE.Raycaster();
+  const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
+  function hitAt(mesh, ox, oy, oz, dx, dy, dz) {
+    _ray.set(_v1.set(ox, oy, oz), _v2.set(dx, dy, dz).normalize());
+    _ray.far = 10;
+    const h = _ray.intersectObject(mesh, false);
+    if (!h.length) return null;
+    const hit = h[0];
+    return { p: hit.point.clone(), n: hit.face.normal.clone() };
+  }
+  // flat disc (decal) aligned to a surface normal, uv remapped into an atlas cell
+  function discGeo(pos, nrm, rad, uvc, uvr) {
+    const g = new THREE.CircleGeometry(rad, 20).toNonIndexed();
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uvc[0] + (uv.getX(i) - 0.5) * uvr, uvc[1] + (uv.getY(i) - 0.5) * uvr);
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), nrm);
+    const m = new THREE.Matrix4().compose(pos.clone().addScaledVector(nrm, 0.012), q, new THREE.Vector3(1, 1, 1));
+    g.applyMatrix4(m);
+    return g;
+  }
+  // strip following the surface (racing stripe)
+  function stripGeo(mesh, xc, hw, z0, z1, steps) {
+    const rows = [];
+    for (let i = 0; i <= steps; i++) {
+      const z = z0 + (z1 - z0) * (i / steps);
+      const a = hitAt(mesh, xc - hw, 3, z, 0, -1, 0), b = hitAt(mesh, xc + hw, 3, z, 0, -1, 0);
+      if (!a || !b || a.p.y > 0.8 || b.p.y > 0.8 || Math.abs(a.p.y - b.p.y) > 0.08 || (rows.length && Math.abs(a.p.y - rows[rows.length - 1][0].y) > 0.12)) { if (rows.length) break; else continue; }
+      rows.push([a.p.addScaledVector(a.n, 0.012), b.p.addScaledVector(b.n, 0.012), a.n, b.n]);
+    }
+    if (rows.length < 2) return null;
+    const pos = [], nor = [];
+    const push = (r, k) => { const v = r[k], n = r[k + 2]; pos.push(v.x, v.y, v.z); nor.push(n.x, n.y, n.z); };
+    for (let i = 0; i < rows.length - 1; i++) {
+      const A = rows[i], B = rows[i + 1];
+      push(A, 0); push(B, 0); push(A, 1);
+      push(A, 1); push(B, 0); push(B, 1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    return g;
+  }
+
+  const CHROME_COLS = { 0x3a3a46: 0xc6ccd8, 0x333340: 0xd8dde8 };
+  const LAMP_COLS = { 0xfff2b0: 1, 0xfff0a0: 1, 0xfff09a: 1, 0xfff2a0: 1 };
+  let kartIdx = null;
+  const KART_TRIS = 1500, RIDER_TRIS = 1250;
+
   const kartGeoCache = {};
+  function kartGeo(k) {
+    if (kartGeoCache[k.id]) return kartGeoCache[k.id];
+    if (!kartIdx) { kartIdx = {}; G.KARTS.forEach((kk, i) => (kartIdx[kk.id] = i + 1)); }
+    const kp = kartParts(k);
+    const bodyP = [], chromeP = [];
+    let hasLamp = false;
+    kp.p.forEach((pt) => {
+      if (pt.m === 'c' || CHROME_COLS[pt.c]) { chromeP.push(Object.assign({}, pt, { c: CHROME_COLS[pt.c] || 0xdde2ee, uv: UV_CHROME })); }
+      else if (LAMP_COLS[pt.c]) { hasLamp = true; chromeP.push(Object.assign({}, pt, { c: 0xffffff, uv: UV_LAMP })); }
+      else bodyP.push(pt);
+    });
+    // exhaust trumpets
+    kp.ex.forEach((e) => {
+      chromeP.push(Object.assign(P('cyl', [0.108, 0.085, 0.1, 10, 'o'], 0xe8ecf4, [e[0], e[1], e[2] + 0.1], [1, 1, 1], [HP, 0, 0]), { uv: UV_CHROME }));
+      chromeP.push(Object.assign(P('disc', [0.07, 10], 0x1a1820, [e[0], e[1], e[2] + 0.04], [1, 1, 1], [Math.PI, 0, 0]), { uv: [0.875, 0.5] }));
+    });
+    // measure the body shell for adaptive trim
+    let lodUse = 1;
+    for (const l of [1, 0.8, 0.65, 0.5, 0.4, 0.3]) { curLod = l; lodUse = l; if (merge(bodyP).attributes.position.count / 3 <= KART_TRIS) break; }
+    const probeGeo = merge(bodyP);
+    const probe = new THREE.Mesh(probeGeo, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+    probe.updateMatrixWorld(true);
+    const extra = [];
+    const idx = kartIdx[k.id] || 1;
+    const tint = shade(k.color, 1.0), stripeC = shade(k.color, 0.45).getHex();
+    const nose = hitAt(probe, 0, 0.36, 4, 0, 0, -1), tail = hitAt(probe, 0, 0.42, -4, 0, 0, 1);
+    const noseZ = nose ? nose.p.z : 1.1, tailZ = tail ? tail.p.z : -1.1;
+    // racing stripes
+    for (const sx of [-0.1, 0.1]) {
+      const sg = stripGeo(probe, sx, 0.045, Math.max(0.55, noseZ - 1.0), noseZ - 0.12, 7);
+      if (sg) extra.push({ geo: sg, c: 0xffffff, uv: UV_WHITE });
+    }
+    // number roundels on both flanks
+    for (const sd of [-1, 1]) {
+      let h = hitAt(probe, sd * 3, 0.44, 0.05, -sd, 0, 0) || hitAt(probe, sd * 3, 0.36, 0.05, -sd, 0, 0);
+      if (h && Math.abs(h.n.x) > 0.5) extra.push({ geo: discGeo(h.p, h.n, 0.16, UV_ROUNDEL, 0.5), c: 0xffffff, uv: null });
+    }
+    // nose number plate / emblem + head & tail lamps + bumpers
+    if (nose) {
+      const hw = 0.26;
+      for (const sd of [-1, 1]) {
+        if (!hasLamp) {
+          const h = hitAt(probe, sd * 0.3, 0.44, 4, 0, 0, -1) || nose;
+          chromeP.push(Object.assign(P('sph', [0.1], 0xffffff, [h.p.x, h.p.y, h.p.z - 0.01], [1, 1, 0.55]), { uv: UV_LAMP }));
+          chromeP.push(Object.assign(P('cyl', [0.108, 0.108, 0.05, 10, 'o'], 0xe4e8f2, [h.p.x, h.p.y, h.p.z - 0.02], [1, 1, 1], [HP, 0, 0]), { uv: UV_CHROME }));
+        }
+      }
+      // front bumper bar
+      const sideHit = hitAt(probe, 3, 0.3, noseZ - 0.25, -1, 0, 0);
+      const bw = Math.max(0.3, Math.min(0.62, sideHit ? sideHit.p.x : 0.5));
+      chromeP.push(Object.assign(P('cyl', [0.045, 0.045, bw * 2, 10], 0xe8ecf4, [0, 0.27, noseZ + 0.03], [1, 1, 1], [0, 0, HP]), { uv: UV_CHROME }));
+      void hw;
+    }
+    if (tail) {
+      for (const sd of [-1, 1]) {
+        const h = hitAt(probe, sd * 0.42, 0.52, -4, 0, 0, 1);
+        if (h) chromeP.push(Object.assign(P('sph', [0.06], 0xffffff, [h.p.x, h.p.y, h.p.z + 0.01], [1.3, 0.8, 0.5]), { uv: UV_TAIL }));
+      }
+      const sideHit = hitAt(probe, 3, 0.3, tailZ + 0.2, -1, 0, 0);
+      const bw = Math.max(0.3, Math.min(0.62, sideHit ? sideHit.p.x : 0.5));
+      chromeP.push(Object.assign(P('cyl', [0.04, 0.04, bw * 2, 10], 0xe8ecf4, [0, 0.27, tailZ - 0.03], [1, 1, 1], [0, 0, HP]), { uv: UV_CHROME }));
+      // rear emblem plate on the seat back
+      extra.push({ geo: discGeo(new THREE.Vector3(0, 1.12, -0.93), new THREE.Vector3(0, 0.2, -1).normalize(), 0.12, UV_ROUNDEL, 0.5), c: 0xffffff, uv: null });
+    }
+    probeGeo.dispose(); probe.material.dispose();
+    // finalise
+    curLod = lodUse;
+    const geo = merge(bodyP.concat(extra.map((e) => (e.uv === null ? { geo: e.geo, c: e.c } : e))));
+    const cgeo = merge(chromeP, UV_CHROME);
+    curLod = 1;
+    const bodyTex = kartAtlas(k, idx);
+    let bm;
+    if (G.GFX && G.GFX.shiny) bm = G.GFX.shiny({ vertexColors: true, map: bodyTex, reflectivity: 0.2, shininess: 90, specular: 0x666666 });
+    else bm = new THREE.MeshPhongMaterial({ vertexColors: true, map: bodyTex, shininess: 70, specular: 0x555555 });
+    if (G.GFX && G.GFX.envMap && !bm.envMap) bm.envMap = G.GFX.envMap;
+    void tint; void stripeC;
+    return (kartGeoCache[k.id] = { geo, cgeo, ex: kp.ex, hub: kp.hub, mat: bm });
+  }
 
   function buildKart(kartId, frontId, rearId) {
     const k = kartById[kartId] || G.KARTS[0];
-    let cache = kartGeoCache[k.id];
-    if (!cache) {
-      const kp = kartParts(k);
-      cache = kartGeoCache[k.id] = { geo: merge(kp.p), ex: kp.ex, hub: kp.hub };
-    }
+    const cache = kartGeo(k);
     const group = new THREE.Group();
     group.name = 'kart_' + k.id;
-    const body = new THREE.Mesh(cache.geo, mat());
+    const body = new THREE.Mesh(cache.geo, cache.mat);
     body.name = 'kartBody';
+    body.castShadow = true;
     group.add(body);
+    const chrome = new THREE.Mesh(cache.cgeo, chromeMat());
+    chrome.name = 'kartChrome';
+    chrome.castShadow = true;
+    group.add(chrome);
 
     const wr = WHEEL[k.weight];
-    const wg = wheelGeo(wr[0], wr[1], cache.hub);
+        const wm = wheelMat();
     const wx = 0.8 - wr[1] / 2;
     const wheels = [], pivots = [];
     const spots = [[-1, 0.75], [1, 0.75], [-1, -0.75], [1, -0.75]]; // fl, fr, rl, rr (x sign: +x is left when facing +Z)
     spots.forEach((s, i) => {
       const w = new THREE.Object3D();
-      const m = new THREE.Mesh(wg, mat());
+      const m = new THREE.Mesh(wheelGeo(wr[0], wr[1], cache.hub, s[0] < 0 ? -1 : 1), wm);
+      m.castShadow = true;
       w.add(m);
       if (i < 2) {
         const pv = new THREE.Object3D();
@@ -1192,9 +1496,22 @@
     poly(x, [cx - dy * w, cy + dx * w, cx + dx * len, cy + dy * len, cx + dy * w, cy - dx * w], fill, '#222');
   }
   function eyePair(x, cx, cy, gap, r) {
+    const iris = css(irisCol);
     for (const sd of [-1, 1]) {
-      ell(x, cx + sd * gap, cy, r, r * 1.25, '#1c1a24');
-      ell(x, cx + sd * gap - r * 0.3, cy - r * 0.45, r * 0.38, r * 0.38, '#fff');
+      const ex = cx + sd * gap;
+      const R = r * 1.4;
+      x.save();
+      x.beginPath(); x.ellipse(ex, cy, R, R * 1.3, 0, 0, Math.PI * 2);
+      x.fillStyle = '#fff'; x.fill(); x.lineWidth = 1.6; x.strokeStyle = '#1c1a24'; x.stroke();
+      x.clip();
+      const g = x.createRadialGradient(ex - sd * R * 0.1, cy - R * 0.4, R * 0.1, ex, cy + R * 0.1, R * 0.95);
+      g.addColorStop(0, css(shade(irisCol, 1.5).getHex())); g.addColorStop(0.6, iris); g.addColorStop(1, css(shade(irisCol, 0.55).getHex()));
+      x.fillStyle = g; x.beginPath(); x.ellipse(ex - sd * R * 0.08, cy + R * 0.08, R * 0.78, R * 0.98, 0, 0, Math.PI * 2); x.fill();
+      x.fillStyle = '#120f18'; x.beginPath(); x.ellipse(ex - sd * R * 0.08, cy + R * 0.08, R * 0.42, R * 0.55, 0, 0, Math.PI * 2); x.fill();
+      x.restore();
+      x.fillStyle = '#fff';
+      x.beginPath(); x.ellipse(ex - R * 0.34, cy - R * 0.4, R * 0.28, R * 0.32, 0, 0, Math.PI * 2); x.fill();
+      x.beginPath(); x.arc(ex + R * 0.3, cy + R * 0.45, R * 0.13, 0, Math.PI * 2); x.fill();
     }
   }
   function smile(x, cx, cy, w, col) {
@@ -1207,6 +1524,7 @@
     const cv = document.createElement('canvas');
     cv.width = cv.height = 128;
     const x = cv.getContext('2d');
+    irisCol = IRIS[ch.id] || 0x4a8ae0;
     const P1 = css(co.primary), S1 = css(co.secondary), SK = css(co.skin), AC = css(co.accent);
     // diagonal two-tone background
     const bgA = css(shade(co.primary, 0.55).getHex()), bgB = css(shade(co.accent, 1.1).getHex());
@@ -1454,8 +1772,23 @@
         break;
       }
     }
-    // frame
+    // glossy finish: soft-light key light + vignette + shine streak + bevelled frame
+    x.save();
+    x.globalCompositeOperation = 'soft-light';
+    let g = x.createRadialGradient(40, 30, 4, 64, 64, 110);
+    g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.45, 'rgba(128,128,128,1)'); g.addColorStop(1, 'rgba(0,0,0,1)');
+    x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+    x.globalCompositeOperation = 'multiply';
+    g = x.createRadialGradient(64, 62, 52, 64, 64, 96);
+    g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(120,110,140,1)');
+    x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+    x.globalCompositeOperation = 'source-over';
+    g = x.createLinearGradient(0, 0, 70, 70);
+    g.addColorStop(0, 'rgba(255,255,255,0.28)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = g; x.beginPath(); x.moveTo(0, 0); x.lineTo(78, 0); x.lineTo(0, 78); x.closePath(); x.fill();
+    x.restore();
     x.lineWidth = 6; x.strokeStyle = '#1c1a24'; x.strokeRect(0, 0, 128, 128);
+    x.lineWidth = 1.5; x.strokeStyle = 'rgba(255,255,255,0.55)'; x.strokeRect(4.5, 4.5, 119, 119);
     return cv;
   }
 
