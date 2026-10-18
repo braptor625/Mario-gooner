@@ -261,10 +261,10 @@
     beach: [
       ['C', 22, 34, -3, 3, 3.5, 6.5, [0xeaf6ff, 0xd6ecff], 0.07, 1.8, 0.25, 0.8, 0.6, 0, 2],
       ['A', 44, 24, -2, 7, 0.1, 0.2, [0xffffff, 0xbfefff], 0.75, 0.6, 0.1, 0.3, 0.8, 4.5],
-      ['E', 6, 140, 22, 34, 2.6, 3.6, [0xffffff, 0xf2f2f2], 1, 0, 0, 0, 0, 0, 7],
+      ['E', 6, 140, 14, 26, 4.2, 5.6, [0xffffff, 0xf2f2f2], 1, 0, 0, 0, 0, 0, 7],
     ],
     desert: [
-      ['C', 34, 42, -2.5, 4, 2.2, 3.6, [0xe9c88c, 0xf0d8a0], 0.2, 20, 0.05, 6, 0.6, 0, 1],
+      ['C', 34, 42, -2.5, 4, 2.2, 3.6, [0xf0d090, 0xf8e4b0], 0.38, 20, 0.05, 6, 0.6, 0, 1],
       ['C', 10, 40, -2.5, 3, 6, 9, [0xe8c890], 0.06, 7, 0.1, 2, 0.5, 0, 2],
       ['A', 30, 22, -2, 6, 0.08, 0.14, [0xffe8b0, 0xfff4d0], 0.6, 4, 0.1, 1.5, 0.6, 1.6],
     ],
@@ -370,21 +370,21 @@
       let n = Math.round(L[1] * s.qf); n = Math.min(n, AMB_CAP[L[0]] - used[L[0]]);
       for (let j = 0; j < n; j++) {
         const i = used[L[0]]++;
-        const kind = L[14] || 1; const size = R(L[5], L[6]) * (kind === 1 || kind === 2 || kind === 6 || kind === 7 ? 1 : 1.7);
+        const kind = L[14] || 1; const size = R(L[5], L[6]) * (kind === 1 || kind === 2 || kind === 6 || kind === 7 ? 1 : 3.4);
         const shape = L[15] || 0;
         const hex = L[7][(rnd() * L[7].length) | 0];
         let w = size, h = size;
         if (kind === 6) { w = size * 2.2; h = w; }
         if (kind === 7) { w = size; h = size * 0.5; }
-        if (L[0] === 'C' && L[14] === 1) { w = size * 2.4; h = size * 0.07; } // sand streak
+        if (L[0] === 'C' && L[14] === 1) { w = size * 2.6; h = size * 0.13; } // sand streak
         P.amb(i, kind, hex, L[8], w, h);
         P.vx[i] = L[9]; P.vy[i] = L[10]; P.vz[i] = L[11]; P.flut[i] = L[12]; P.spin[i] = L[13] * R(0.6, 1.4);
-        P.rad[i] = L[2]; P.ylo[i] = L[3]; P.yhi[i] = L[4]; P.shape[i] = shape;
+        P.rad[i] = (L[0] === 'A' || L[0] === 'B' || L[0] === 'D') ? L[2] * 0.6 : L[2]; P.ylo[i] = L[3]; P.yhi[i] = L[4]; P.shape[i] = shape;
         if (kind === 3 || shape === 1) P.shape[i] = 1;
         if (kind === 6) { P.grav[i] = rnd() * TAU; P.vx[i] = R(1.4, 2.6); }
         if (kind === 7) { P.aSz.array[i * 4 + 3] = 1; P.grav[i] = rnd() * TAU; P.spin[i] = (rnd() < 0.5 ? -1 : 1) * R(0.12, 0.28); P.drag[i] = R(18, 34); P.vx[i] = 1e9; }
         // initial placement random in box (relative to origin; repositioned on first update around camera)
-        P.aPos.array[i * 3] = R(-L[2], L[2]); P.aPos.array[i * 3 + 1] = R(L[3], L[4]); P.aPos.array[i * 3 + 2] = R(-L[2], L[2]);
+        P.aPos.array[i * 3] = R(-P.rad[i], P.rad[i]); P.aPos.array[i * 3 + 1] = R(L[3], L[4]); P.aPos.array[i * 3 + 2] = R(-P.rad[i], P.rad[i]);
         P.life[i] = -1; // marks "needs first-frame placement around camera"
       }
     }
@@ -639,7 +639,7 @@
       if (c.type === 1) cannonConfetti(c, false);
       else if (c.type === 3) cannonConfetti(c, true);
       else if (c.type === 2) {
-        const sh = S.shells; if (sh.length < 10) sh.push({ x: c.x, y: c.y - 22, z: c.z, vy: 24, tx: c.y });
+        const sh = S.shells; if (sh.length < 10) sh.push({ x: c.x, y: c.y - 19, z: c.z, vy: 19, tx: c.y });
       }
     }
     const sh = S.shells, B = S.pools.B;

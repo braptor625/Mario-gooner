@@ -2081,7 +2081,9 @@
           for (let j = 0; j < 3; j++) {
             const a = this._t * 7.5 + j * 2.094 + role * 1.3, rad = 0.46 * sc;
             const yel = (j & 1) ? 0.4 : 0;
-            A.put(1, 0, hx + Math.cos(a) * rad, hy + Math.sin(a * 1.0) * 0.07, hz + Math.sin(a) * rad, 0.3 * sc + 0.04 * Math.sin(a * 3), 1, 0.9 + yel * 0.2, 0.2 + yel, 0.95 * kf, 0, 0, 0, a * 2);
+            const sx = hx + Math.cos(a) * rad, sy2 = hy + Math.sin(a) * 0.07, sz = hz + Math.sin(a) * rad, sz2 = 0.42 * sc + 0.05 * Math.sin(a * 3);
+            S.put(1, 0, sx, sy2, sz, sz2 * 1.25, 0.9, 0.45, 0.0, 0.9 * kf, 0, 0, 0, a * 2);   // dark rim so it reads on bright sky
+            A.put(1, 0, sx, sy2, sz, sz2, 1, 0.92 + yel * 0.08, 0.15 + yel * 0.5, 0.95 * kf, 0, 0, 0, a * 2);
           }
         }
       }

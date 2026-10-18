@@ -758,6 +758,11 @@
     if (drive) for (const h of Game.humans) if (!h.kart.finished || Game.mode === 'battle') routeInput(h);
     stepAIs();
     for (const k of Game.karts) k.update(STEP);
+    for (const h of Game.humans) {
+      const surf = h.kart.trackInfo && h.kart.trackInfo.surface;
+      if (surf === 'boost' && h.kart._ambSurf !== 'boost') amb('boostPad', h.kart);
+      h.kart._ambSurf = surf;
+    }
     G.Kart.resolveCollisions(Game.karts);
     collideHazards();
     Game.items.update(STEP, Game.raceTime);
