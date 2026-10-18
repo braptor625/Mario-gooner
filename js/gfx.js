@@ -20,9 +20,18 @@
     envMap: null,
     sunDir: new THREE.Vector3(0.45, 0.8, 0.35).normalize(),
     sunColor: new THREE.Color(0xfff2d8),
-    bloomStrength: 0.55,
-    bloomThreshold: 0.72,
+    bloomStrength: 0.3,
+    bloomThreshold: 0.84,
+    exposure: 0.95,
+    // "GameCube" video filter: ~480p-class internal resolution (soft upscale), 6-bit-per-channel
+    // colour with ordered dithering like the console's framebuffer, vertical deflicker blur, warm grade
+    retro: true,
+    retroHeight: 576,
   });
+  try {
+    const st = G.Save && G.Save.settings;
+    if (st && st.retro !== undefined) GFX.retro = !!st.retro;
+  } catch (e) { /* save not ready */ }
 
   // ------------------------------------------------------------------ textures
   function canvasTex(w, h, draw, repeat) {
@@ -185,7 +194,7 @@
     const rim = opts.rim; delete opts.rim;
     const m = new THREE.MeshPhongMaterial(Object.assign({
       color: 0xffffff, shininess: 80, specular: 0x777777,
-      envMap: GFX.envMap || null, combine: THREE.MixOperation, reflectivity: 0.22,
+      envMap: GFX.envMap || null, combine: THREE.MixOperation, reflectivity: 0.1,
     }, opts));
     GFX.patchRim(m, rim || { strength: 0.25 });
     return m;
@@ -201,7 +210,7 @@
     const u = {
       detailMap: { value: tex },
       detailScale: { value: opts.scale !== undefined ? opts.scale : 0.35 },
-      detailStrength: { value: opts.strength !== undefined ? opts.strength : 0.35 },
+      detailStrength: { value: opts.strength !== undefined ? opts.strength : 0.25 },
       detailMacro: { value: opts.macro !== undefined ? opts.macro : 0.18 },
     };
     material.userData.detail = u;
@@ -325,25 +334,44 @@
       }),
       final: new THREE.ShaderMaterial({
         uniforms: {
-          tDiffuse: { value: null }, tBloom: { value: null }, bloom: { value: 0.55 },
-          saturation: { value: 1.12 }, contrast: { value: 1.06 }, vignette: { value: 0.22 }, time: { value: 0 },
-          tint: { value: new THREE.Color(1.02, 1.0, 0.97) },
+          tDiffuse: { value: null }, tBloom: { value: null }, bloom: { value: 0.3 },
+          saturation: { value: 1.2 }, contrast: { value: 1.05 }, vignette: { value: 0.18 }, time: { value: 0 },
+          tint: { value: new THREE.Color(1.03, 1.0, 0.95) }, exposure: { value: 0.92 },
+          retro: { value: 1 }, srcSize: { value: new THREE.Vector2(1, 1) },
         },
         vertexShader: vs,
         fragmentShader: [
           'uniform sampler2D tDiffuse; uniform sampler2D tBloom; uniform float bloom; uniform float saturation;',
-          'uniform float contrast; uniform float vignette; uniform float time; uniform vec3 tint; varying vec2 vUv;',
+          'uniform float contrast; uniform float vignette; uniform float time; uniform vec3 tint; uniform float exposure;',
+          'uniform float retro; uniform vec2 srcSize; varying vec2 vUv;',
+          'float bayer(vec2 p){ vec2 q = mod(floor(p), 4.0);',
+          ' float i = q.x + q.y * 4.0;',
+          ' float m[16];',
+          ' m[0]=0.0; m[1]=8.0; m[2]=2.0; m[3]=10.0; m[4]=12.0; m[5]=4.0; m[6]=14.0; m[7]=6.0;',
+          ' m[8]=3.0; m[9]=11.0; m[10]=1.0; m[11]=9.0; m[12]=15.0; m[13]=7.0; m[14]=13.0; m[15]=5.0;',
+          ' float r = 0.0; for (int k = 0; k < 16; k++) { if (float(k) == i) r = m[k]; }',
+          ' return r / 16.0 - 0.47; }',
+          'vec3 shoulder(vec3 c){ vec3 x = max(c - 0.72, 0.0); return min(c, 0.72) + x / (1.0 + x * 2.2); }',
           'void main(){',
-          ' vec3 c = texture2D(tDiffuse, vUv).rgb;',
-          ' vec3 b = texture2D(tBloom, vUv).rgb;',
-          ' c += b * bloom;',
-          ' c *= tint;',
+          ' vec3 c;',
+          ' if (retro > 0.5) {',
+          // GC "deflicker" copy filter: 3-line vertical blend
+          '  vec2 px = vec2(0.0, 1.0 / srcSize.y);',
+          '  c = texture2D(tDiffuse, vUv).rgb * 0.62 + texture2D(tDiffuse, vUv + px).rgb * 0.19 + texture2D(tDiffuse, vUv - px).rgb * 0.19;',
+          ' } else c = texture2D(tDiffuse, vUv).rgb;',
+          ' c += texture2D(tBloom, vUv).rgb * bloom;',
+          ' c *= exposure * tint;',
           ' float l = dot(c, vec3(0.299, 0.587, 0.114));',
           ' c = mix(vec3(l), c, saturation);',
           ' c = (c - 0.5) * contrast + 0.5;',
-          ' c = c / (1.0 + max(c - 1.0, 0.0) * 0.6);',            // soft shoulder for blown highlights
-          ' vec2 q = vUv - 0.5; c *= 1.0 - dot(q, q) * vignette * 2.2;',
-          ' c += (fract(sin(dot(vUv * 913.7 + time, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;',
+          ' c = shoulder(c);',
+          ' vec2 q = vUv - 0.5; c *= 1.0 - dot(q, q) * vignette * 2.0;',
+          ' if (retro > 0.5) {',
+          // 6 bits per channel with 4x4 ordered dither on the internal pixel grid; slightly lifted blacks
+          '  float d = bayer(vUv * srcSize);',
+          '  c = floor(c * 63.0 + 0.5 + d) / 63.0;',
+          '  c = c * 0.975 + 0.018;',
+          ' } else c += (fract(sin(dot(vUv * 913.7 + time, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;',
           ' gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0); }',
         ].join('\n'),
         depthTest: false, depthWrite: false,
@@ -355,8 +383,10 @@
     return { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat, depthBuffer: false, stencilBuffer: false };
   }
   function ensureTargets(renderer, w, h) {
+    if (GFX.retro && h > GFX.retroHeight) { w = Math.max(1, Math.round(w * GFX.retroHeight / h)); h = GFX.retroHeight; }
     const msaa = GFX.quality === 'high' && renderer.capabilities.isWebGL2 && !!THREE.WebGLMultisampleRenderTarget;
     if (P.scene && P.w === w && P.h === h && P.msaa === msaa) return;
+    P.scene && (P.scene.texture.minFilter = THREE.LinearFilter);
     ['scene', 'bright', 'b1', 'b2'].forEach((k) => { if (P[k]) P[k].dispose(); });
     const so = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat, depthBuffer: true, stencilBuffer: false };
     if (msaa) { P.scene = new THREE.WebGLMultisampleRenderTarget(w, h, so); P.scene.samples = 4; }
@@ -365,7 +395,7 @@
     P.bright = new THREE.WebGLRenderTarget(hw, hh, rtOpts());
     P.b1 = new THREE.WebGLRenderTarget(qw, qh, rtOpts());
     P.b2 = new THREE.WebGLRenderTarget(qw, qh, rtOpts());
-    P.w = w; P.h = h; P.msaa = msaa;
+    P.w = w; P.h = h; P.msaa = msaa; P.retro = GFX.retro;
   }
   function pass(renderer, mat, target) {
     quad.material = mat;
@@ -399,15 +429,16 @@
     if (!quad) makeQuad();
     ensureTargets(renderer, W, H);
     const rt = P.scene;
+    const RW = P.w, RH = P.h;
     // scene views into the (multisampled) target
     if (views.length <= 1) {
-      rt.viewport.set(0, 0, W, H); rt.scissorTest = false;
+      rt.viewport.set(0, 0, RW, RH); rt.scissorTest = false;
       renderer.setRenderTarget(rt);
       renderer.render(scene, views[0].camera);
     } else {
       for (const v of views) {
-        const x = Math.round(v.rect.x * W), w = Math.round(v.rect.w * W), h = Math.round(v.rect.h * H);
-        const y = Math.round(H - (v.rect.y + v.rect.h) * H);
+        const x = Math.round(v.rect.x * RW), w = Math.round(v.rect.w * RW), h = Math.round(v.rect.h * RH);
+        const y = Math.round(RH - (v.rect.y + v.rect.h) * RH);
         rt.viewport.set(x, y, w, h); rt.scissor.set(x, y, w, h); rt.scissorTest = true;
         renderer.setRenderTarget(rt);
         renderer.render(scene, v.camera);
@@ -426,6 +457,7 @@
     // composite to screen
     const f = mats.final.uniforms;
     f.tDiffuse.value = rt.texture; f.tBloom.value = P.b2.texture; f.bloom.value = GFX.bloomStrength; f.time.value = GFX.time % 100;
+    f.exposure.value = GFX.exposure; f.retro.value = GFX.retro ? 1 : 0; f.srcSize.value.set(RW, RH);
     renderer.setRenderTarget(null);
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, cssW, cssH);
@@ -436,6 +468,18 @@
   GFX.setQuality = function (q) {
     GFX.quality = q;
   };
+  GFX.setRetro = function (on) {
+    GFX.retro = !!on;
+    try { if (G.Save && G.Save.settings) { G.Save.settings.retro = GFX.retro; G.Save.persist && G.Save.persist(); } } catch (e) { /* ignore */ }
+  };
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'KeyG' && !e.repeat && !(e.target && /INPUT|TEXTAREA/.test(e.target.tagName))) {
+        GFX.setRetro(!GFX.retro);
+        if (G.HUD && G.HUD.banner && G.Game && G.Game.state === 'race') G.HUD.banner(GFX.retro ? 'GAMECUBE FILTER ON' : 'FILTER OFF', 'info');
+      }
+    });
+  }
 
   if (hasCanvas) {
     buildTextures();

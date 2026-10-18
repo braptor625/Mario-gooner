@@ -16,13 +16,14 @@ npx http-server .   # or: python3 -m http.server
 | Accelerate | ↑ / W / X | A or RT |
 | Brake / reverse | ↓ / S | B or LT |
 | Steer | ← → / A D | Left stick or D-pad |
-| Hop / drift (wiggle the steering twice for blue sparks, then release for a mini-turbo) | Shift / Space | RB |
+| Hop / drift (hold through the turn until the sparks turn blue, then release for a mini-turbo; wiggling the steering charges faster) | Shift / Space | RB |
 | Use the rear rider's item (hold to drag it behind you; hold down to throw it backwards) | E / L / Ctrl | X or LB |
 | Swap riders (their items swap too) | Q / Z | Y |
 | Slap a kart beside you | F | Right stick click |
 | Look back | C | View |
 | Pause | Esc / P | Menu |
 | Menus | Arrows + Enter / Esc | D-pad or stick + A / B |
+| Toggle GameCube video filter | G | |
 
 The controller works in Chrome, Edge and Firefox. In Firefox on Linux it may not report the standard layout; that case is handled too. For a 2-player game on one keyboard, player 1 uses W/A/S/D, Left Shift, E and Q. Player 2 uses the arrows, Right Shift, Enter and comma. Every connected controller is assigned to a player.
 

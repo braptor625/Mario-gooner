@@ -8,7 +8,10 @@
 
   const HOP_TIME = 0.25, HOP_H = 0.35;
   const SPIN_TIME = 1.1, FLIP_TIME = 1.5, SQUISH_TIME = 1.5;
-  const MT_TIME = 0.75;           // mini-turbo length (s)
+  const MT_TIME = 1.0;            // mini-turbo length (s)
+  const CHARGE_BLUE = 1.0;        // drift charge needed for blue sparks (holding ~1.1 s, wiggles speed it up)
+  const CHARGE_RATE = 0.9;        // charge per second just from holding the drift
+  const CHARGE_FLICK = 0.4;       // extra charge per counter-steer wiggle (DD technique)
   const FLICKS_BLUE = 2;          // wiggles needed for blue sparks
   const FALL_TIME = 0.4, CARRY_TIME = 1.2, DRONE_HANG = 3.4;
   const SLAP_CD = 0.8, SLAP_ANIM = 0.4;
@@ -454,6 +457,7 @@
       this._slapCd = 0; this._slapAnim = 0; this._slapSide = 1;
       this._wobble = 0; this._wobbleDir = 1;
       this._flickN = 0; this._flickMin = 0; this._flickSt = 0;
+      this._driftSteer = 0; this._kx = 0; this._kz = 0; this._impactCd = 0;
       this._cn = null; this._cnT = 0; this._cnDur = 1; this._cnD0 = 0; this._cnD1 = 0; this._cnY0 = 0; this._cnH = 16;
       this._rescueT = 0; this._rp = null;
       this._capX = 0; this._capY = 0; this._capZ = 0; this._capH = 0;
@@ -664,7 +668,7 @@
       d = ((d % L) + L) % L;
       const rp = this.track.respawnPoint(d);
       this.pos.set(rp.x, rp.y, rp.z);
-      this.heading = rp.heading;
+      this.heading = rp.heading; this._kx = 0; this._kz = 0;
       this.speed = 0;
       this.vel.set(0, 0, 0);
       this.vy = 0;
@@ -884,7 +888,7 @@
         this.rescued = false; this.falling = false;
         this._drone.visible = false;
         this.pos.set(rp.x, rp.y, rp.z);
-        this.heading = rp.heading;
+        this.heading = rp.heading; this._kx = 0; this._kz = 0;
         this.speed = 0; this.vel.set(0, 0, 0); this.vy = 0;
         this.airborne = false; this.airTime = 0;
         this._fallTimer = 0;
@@ -980,7 +984,7 @@
         fx.shadow.set(this._shSlot, this.pos.x, gy + 0.06, this.pos.z, hd, 1.35 * ss, 1.75 * ss, vis ? 0.62 * (1 - clamp(h * 0.04, 0, 0.5)) : 0);
       }
       // ---- drift sparks (yellow -> blue) with streaks + glow
-      if (this.drifting && this._flickN > 0 && !this.airborne) {
+      if (this.drifting && this.driftCharge > 0.3 && !this.airborne) {
         const blue = this.driftLevel >= 1;
         const r = blue ? 0.3 : 1, g = blue ? 0.62 : 0.78, b = blue ? 1 : 0.15;
         const er = blue ? 0.1 : 1, eg = blue ? 0.25 : 0.3, eb = blue ? 1 : 0.02;
@@ -1211,8 +1215,8 @@
           else if (Math.abs(steer) > 0.3 && spd01 > 0.4) {
             this.drifting = true;
             this.driftDir = steer > 0 ? 1 : -1;
-            this.driftCharge = 0; this.driftLevel = 0; this._flick = 0;
-            this._flickN = 0; this._flickSt = 0; this._flickMin = 0;
+            this.driftCharge = 0; this.driftLevel = 0; this._flick = 0; this._flickSeen = 0;
+            this._flickN = 0; this._flickSt = 0; this._flickMin = 0; this._driftSteer = steer;
             this._hopPending = false;
             this._snd('drift_start');
           } else if (this._hopTimer <= 0) this._hopPending = false;
@@ -1233,8 +1237,12 @@
             if (rel < this._flickMin) this._flickMin = rel;
             if (rel > 0.35 || (rel > -0.02 && this._flickMin < -0.45)) { this._flickSt = 0; this._flickN++; }
           }
-          this.driftCharge = this._flickN;
-          this.driftLevel = this._flickN >= FLICKS_BLUE ? 1 : 0;
+          // holding the slide charges on its own; DD-style wiggles charge faster
+          this.driftCharge = (this.driftCharge || 0) + CHARGE_RATE * dt;
+          if (this._flickN !== this._flickSeen) { this.driftCharge += CHARGE_FLICK * (this._flickN - (this._flickSeen || 0)); this._flickSeen = this._flickN; }
+          const wasBlue = this.driftLevel >= 1;
+          this.driftLevel = this.driftCharge >= CHARGE_BLUE ? 1 : 0;
+          if (!wasBlue && this.driftLevel >= 1) this._snd('drift_start');
         }
       }
 
@@ -1248,8 +1256,9 @@
         if (onIce) rate *= 0.85;
         const sgn = this.speed < 0 ? -1 : 1;
         if (this.drifting) {
-          const turn = this.driftDir * (0.75 + 0.5 * steer * this.driftDir);
-          this.heading -= turn * rate * 1.1 * dt;
+          this._driftSteer = damp(this._driftSteer, steer, 7, dt);
+          const turn = this.driftDir * (0.6 + 0.35 * this._driftSteer * this.driftDir);
+          this.heading -= turn * rate * 0.95 * dt;
         } else {
           this.heading -= steer * rate * sgn * dt;
         }
@@ -1263,6 +1272,14 @@
       this.vel.z += (fz * this.speed - this.vel.z) * kg;
       this.pos.x += this.vel.x * dt;
       this.pos.z += this.vel.z * dt;
+      // kart-to-kart knock-back decays on its own so bumps read as bounces, not sticking
+      if (this._kx !== 0 || this._kz !== 0) {
+        this.pos.x += this._kx * dt; this.pos.z += this._kz * dt;
+        const kd = Math.exp(-5 * dt);
+        this._kx *= kd; this._kz *= kd;
+        if (this._kx * this._kx + this._kz * this._kz < 0.01) { this._kx = 0; this._kz = 0; }
+      }
+      if (this._impactCd > 0) this._impactCd -= dt;
       if (this._wobble > 0) this.heading += this._wobbleDir * Math.sin(this._wobble * 40) * 0.6 * dt;
 
       // ---- vertical
@@ -1307,8 +1324,10 @@
         }
         if (this._wallCd <= 0) {
           this._wallCd = 0.25;
-          this.speed *= 0.68;
-          this.vel.x *= 0.8; this.vel.z *= 0.8;
+          const into = Math.abs(Math.sin(this.heading) * ti.rx + Math.cos(this.heading) * ti.rz); // 0 glancing .. 1 head-on
+          this.speed *= 1 - 0.5 * into;
+          this.vel.x *= 0.9; this.vel.z *= 0.9;
+          this._kx -= ti.rx * sgn * 3 * into; this._kz -= ti.rz * sgn * 3 * into;
           // nudge heading toward track tangent
           const th = Math.atan2(ti.tx, ti.tz);
           let dh = th - this.heading;
@@ -1318,8 +1337,6 @@
           this.heading += dh * 0.35;
           if (this._wallSnd <= 0) { this._wallSnd = 0.4; this._snd('wall'); }
           this._endDrift(false);
-        } else {
-          this.speed *= 0.99;
         }
       }
 
@@ -1604,13 +1621,21 @@
           const wa = mb / (ma + mb), wb = ma / (ma + mb); // share of push for a, b
           a.pos.x -= nx * overlap * wa; a.pos.z -= nz * overlap * wa;
           b.pos.x += nx * overlap * wb; b.pos.z += nz * overlap * wb;
-          // velocity exchange along normal
+          // bounce: a decaying knock-back impulse along the contact normal (min 3.5 m/s so pileups
+          // spread out), plus a one-off speed loss only for a kart that drove nose-first into the other
           const rv = (b.vel.x - a.vel.x) * nx + (b.vel.z - a.vel.z) * nz;
-          if (rv < 0) {
-            const jimp = -rv * 1.3;
-            a.vel.x -= nx * jimp * wa; a.vel.z -= nz * jimp * wa;
-            b.vel.x += nx * jimp * wb; b.vel.z += nz * jimp * wb;
-            a.speed *= 1 - 0.06 * wa * 2; b.speed *= 1 - 0.06 * wb * 2;
+          if (rv < 0 || overlap > 0.4) {
+            const close = Math.max(0, -rv);
+            const jimp = Math.min(14, 3.5 + close * 0.9);
+            a._kx -= nx * jimp * wa * 2; a._kz -= nz * jimp * wa * 2;
+            b._kx += nx * jimp * wb * 2; b._kz += nz * jimp * wb * 2;
+            if (close > 2) {
+              const aInto = Math.sin(a.heading) * nx + Math.cos(a.heading) * nz;       // a facing b
+              const bInto = -(Math.sin(b.heading) * nx + Math.cos(b.heading) * nz);    // b facing a
+              const loss = Math.min(0.3, close * 0.02);
+              if (a._impactCd <= 0 && aInto > 0.5) { a.speed *= 1 - loss * wa * 2 * aInto; a._impactCd = 0.4; }
+              if (b._impactCd <= 0 && bInto > 0.5) { b.speed *= 1 - loss * wb * 2 * bInto; b._impactCd = 0.4; }
+            }
           }
           // star / squish
           const aStar = a.starTimer > 0, bStar = b.starTimer > 0;
