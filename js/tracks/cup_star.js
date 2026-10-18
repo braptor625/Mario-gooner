@@ -113,6 +113,7 @@
       if (capEnd) b.tri(c, t0, t1, k);
     }
   }
+  const poseE = new T.Euler(), poseQ = new T.Quaternion(), poseV = new T.Vector3(), poseS = new T.Vector3();
   // instanced mesh helper (no per-frame allocation)
   function makeInst(kit, geom, mat, count) {
     const mesh = new T.InstancedMesh(geom, mat, count);
@@ -130,6 +131,13 @@
         mesh.setMatrixAt(i, m4);
       },
       color(i, hex) { col.setHex(hex); mesh.setColorAt(i, col); },
+      // full pose (launched hazards): position, euler rotation, uniform scale
+      pose(i, x, y, z, rx, ry, rz, sc) {
+        poseE.set(rx, ry, rz); poseQ.setFromEuler(poseE);
+        const k = Math.max(0.0001, sc);
+        m4.compose(poseV.set(x, y, z), poseQ, poseS.set(k, k, k));
+        mesh.setMatrixAt(i, m4);
+      },
       done() { mesh.instanceMatrix.needsUpdate = true; if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true; },
     };
   }
@@ -404,6 +412,8 @@
           pen.set(i, this.x, c[2] + 0.05, this.z, Math.atan2(this.vx, this.vz) * 1, 1.7, 1.7, 1.7);
           if (i === n - 1) pen.done();
         };
+        hz.launchPose = function (L) { pen.pose(i, L.x, L.y, L.z, L.rx, L.ry, L.rz, 1.7 * L.s); pen.done(); };
+        hz.popScale = function (k) { pen.pose(i, this.x, this.c[2] + 0.05, this.z, 0, Math.atan2(this.vx, this.vz), 0, 1.7 * k); pen.done(); };
         hz.update(0, 0); items.push(hz); list.push(hz);
       });
       // sliding ice blocks that cross the road
@@ -420,6 +430,8 @@
           blk.set(i, this.x, f.y, this.z, a * 0.3);
           if (i === nb - 1) blk.done();
         };
+        hz.launchPose = function (L) { blk.pose(i, L.x, L.y, L.z, L.rx, L.ry, L.rz, L.s); blk.done(); };
+        hz.popScale = function (k) { blk.pose(i, this.x, f.y, this.z, 0, 0, 0, k); blk.done(); };
         hz.update(0, 0); list.push(hz);
       });
       return list;
@@ -712,6 +724,8 @@
             inst.set(i, this.x, f.y, this.z, Math.atan2(f.tx * dir, f.tz * dir));
             if (i === lastIdx) inst.done();
           };
+          hz.launchPose = function (L) { inst.pose(i, L.x, L.y, L.z, L.rx, L.ry, L.rz, L.s); inst.done(); };
+          hz.popScale = function (k) { inst.pose(i, this.x, this.y, this.z, 0, Math.atan2(this.vx * dir, this.vz * dir) * dir, 0, k); inst.done(); };
           hz.update(0, 0);
           list.push(hz);
         }
@@ -1362,6 +1376,14 @@
         dummy.position.set(x, y, z); dummy.rotation.set(spin, ry, 0); dummy.scale.set(sc * R, sc * R, sc * R);
         dummy.updateMatrix(); mesh.setMatrixAt(i, dummy.matrix);
       };
+      const launchPose = (i) => function (L) {
+        dummy.position.set(L.x, L.y + R * 0.5, L.z); dummy.rotation.set(L.rx, L.ry, L.rz);
+        const k = Math.max(0.001, L.s) * R; dummy.scale.set(k, k, k);
+        dummy.updateMatrix(); mesh.setMatrixAt(i, dummy.matrix); mesh.instanceMatrix.needsUpdate = true;
+      };
+      const popScale = (i) => function (k) {
+        put(i, this.x, this.y + R, this.z, Math.atan2(this.vx, this.vz), 0, k); mesh.instanceMatrix.needsUpdate = true;
+      };
       const dA = P.dTo + 90, dZ = P.dBr0 - 25, f = { x: 0, y: 0, z: 0, tx: 0, tz: 1, rx: -1, rz: 0, halfWidth: 12 };
       for (let i = 0; i < nLane; i++) {
         const v = 13 + (i % 4) * 2.2, travel = (dZ - dA) / v, T0 = travel + 2.5 + (i % 3) * 1.3, off = (i / nLane) * T0, lat0 = lanes[i];
@@ -1379,6 +1401,7 @@
           put(i, this.x, f.y + R * sc, this.z, Math.atan2(f.tx, f.tz), -(v * tt) / R, sc);
           if (i === nLane - 1) mesh.instanceMatrix.needsUpdate = true;
         };
+        hz.launchPose = launchPose(i); hz.popScale = popScale(i);
         hz.update(0, 0); list.push(hz);
       }
       const crossD = [P.dTo + 190, P.dTo + 330, P.dTo + 520, P.dBr0 - 110];
@@ -1396,6 +1419,7 @@
           put(i, this.x, fr.y + R, this.z, Math.atan2(this.vx, this.vz), (v * tt) / R, 1);
           if (i === total - 1) mesh.instanceMatrix.needsUpdate = true;
         };
+        hz.launchPose = launchPose(i); hz.popScale = popScale(i);
         hz.update(0, 0); list.push(hz);
       }
       return list;

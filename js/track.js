@@ -1581,7 +1581,7 @@
       out.length = 0;
       for (let i = 0; i < hz.length; i++) {
         const h = hz[i];
-        if (h.active === false) continue;
+        if (h.active === false || h._L) continue;
         let o = h._w; if (!o) o = h._w = { x: 0, y: 0, z: 0, radius: 1, hitKind: 'spin', vx: 0, vz: 0, ref: h };
         o.x = this.mirror ? -h.x : h.x; o.y = h.y || 0; o.z = h.z;
         o.radius = h.radius || 1.5; o.hitKind = h.hitKind || 'spin';
@@ -1591,10 +1591,77 @@
       return out;
     }
 
+    // ------------------------------------------------ launchable hazards (v4)
+    // ref = hazard object from def.hazards() (getHazards() entries carry .ref). vx/vz in WORLD space.
+    // Returns true if the hazard was launched.
+    launchHazard(ref, vx, vy, vz) {
+      const h = ref && ref.ref ? ref.ref : ref;
+      if (!h || h._L || h.launchable === false || h.active === false) return false;
+      if (this._hazards.indexOf(h) < 0) return false;
+      const mx = this.mirror ? -1 : 1;
+      const L = h._L = {
+        t: 0, vx: (vx || 0) * mx, vy: vy === undefined ? 14 : vy, vz: vz || 0,
+        x: h.x, y: h.y || 0, z: h.z, y0: h.y || 0,
+        rx: 0, ry: h.object3D ? h.object3D.rotation.y : 0, rz: 0,
+        sx: (Math.random() - 0.5) * 14, sy: (Math.random() - 0.5) * 10, sz: (Math.random() - 0.5) * 14,
+        s: 1, landed: -1, base: null,
+      };
+      const o3 = h.object3D;
+      if (o3) L.base = { sx: o3.scale.x, sy: o3.scale.y, sz: o3.scale.z, rx: o3.rotation.x, ry: o3.rotation.y, rz: o3.rotation.z };
+      h.vx = L.vx; h.vz = L.vz;
+      if (h.launch) h.launch(L.vx, L.vy, L.vz);
+      if (G.events) G.events.emit('hazardLaunched', { ref: h, x: mx * h.x, z: h.z });
+      return true;
+    }
+    _stepLaunched(h, dt, time) {
+      const L = h._L, o3 = h.object3D;
+      L.t += dt;
+      const POP = 0.45, RESPAWN = 4.0;
+      if (L.t < RESPAWN) {
+        if (L.landed < 0) {
+          L.vy -= 30 * dt;
+          L.x += L.vx * dt; L.y += L.vy * dt; L.z += L.vz * dt;
+          L.rx += L.sx * dt; L.ry += L.sy * dt; L.rz += L.sz * dt;
+          if ((L.vy < 0 && L.y <= L.y0 + 0.3) || L.t > 2.5) { L.landed = L.t; L.vx = L.vz = 0; }
+        }
+        // shrink out after landing (or at 2.5 s)
+        L.s = L.landed < 0 ? 1 : Math.max(0, 1 - (L.t - L.landed) / 0.5);
+      } else {
+        // pop-in: resume normal behaviour, scaled up
+        const k = (L.t - RESPAWN) / POP;
+        if (!L.popped) {
+          L.popped = true;
+          if (o3 && L.base) { o3.rotation.x = L.base.rx; o3.rotation.z = L.base.rz; }
+          if (h.launchEnd) h.launchEnd();
+        }
+        if (h.update) h.update(dt, time);
+        if (k >= 1) {
+          h._L = null;
+          if (o3 && L.base) o3.scale.set(L.base.sx, L.base.sy, L.base.sz);
+          return;
+        }
+        if (o3 && L.base) o3.scale.set(L.base.sx * k, L.base.sy * k, L.base.sz * k);
+        else if (h.popScale) h.popScale(k);
+        return;
+      }
+      h.x = L.x; h.y = L.y; h.z = L.z;
+      if (o3) {
+        o3.position.set(L.x, L.y, L.z);
+        o3.rotation.set(L.rx, L.ry, L.rz);
+        const b = L.base, s = L.s;
+        o3.scale.set(b.sx * s, b.sy * s, b.sz * s);
+      }
+      if (h.launchPose) h.launchPose(L);
+    }
+
     // ------------------------------------------------ per-frame animation
     update(dt, time) {
       this._time = time;
-      for (let i = 0; i < this._hazards.length; i++) { const h = this._hazards[i]; if (h.update) h.update(dt, time); }
+      for (let i = 0; i < this._hazards.length; i++) {
+        const h = this._hazards[i];
+        if (h._L) { this._stepLaunched(h, dt, time); continue; }
+        if (h.update) h.update(dt, time);
+      }
       if (this.def.update) this.def.update(this, dt, time);
       if (this._padMat) { const k = 0.8 + 0.2 * Math.sin(time * 9); this._padMat.color.setRGB(k, k, k); }
       const w = this._anim.water;

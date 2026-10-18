@@ -257,14 +257,55 @@
     dispose() { this.geo.dispose(); this.mat.dispose(); }
   }
 
+  // ---- tire skid marks: ONE pooled ribbon mesh (ring buffer of quads) per scene, fades by age in the shader ----
+  const SK_VERT = 'attribute vec2 aD; varying vec2 vUv; varying vec2 vD; void main(){ vUv = uv; vD = aD; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
+  const SK_FRAG = 'uniform float uT; varying vec2 vUv; varying vec2 vD; void main(){ float age = uT - vD.x; float a = vD.y * (1.0 - smoothstep(1.2, 4.0, age)); a *= smoothstep(0.0, 0.3, vUv.x) * smoothstep(1.0, 0.7, vUv.x); if (a < 0.004) discard; gl_FragColor = vec4(0.025, 0.025, 0.03, a); }';
+  class SkidSys {
+    constructor(cap) {
+      this.cap = cap; this.cur = 0; this.dirty = false;
+      this.pos = new Float32Array(cap * 12); this.dat = new Float32Array(cap * 8);
+      for (let i = 0; i < cap * 4; i++) this.dat[i * 2] = -1000;
+      const uv = new Float32Array(cap * 8), idx = [];
+      for (let i = 0; i < cap; i++) {
+        uv.set([0, 0, 1, 0, 0, 1, 1, 1], i * 8);
+        idx.push(i * 4, i * 4 + 1, i * 4 + 2, i * 4 + 2, i * 4 + 1, i * 4 + 3);
+      }
+      this.geo = new THREE.BufferGeometry();
+      this.aPos = new THREE.BufferAttribute(this.pos, 3); this.aPos.setUsage(THREE.DynamicDrawUsage);
+      this.aD = new THREE.BufferAttribute(this.dat, 2); this.aD.setUsage(THREE.DynamicDrawUsage);
+      this.geo.setAttribute('position', this.aPos);
+      this.geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+      this.geo.setAttribute('aD', this.aD);
+      this.geo.setIndex(idx);
+      this.mat = new THREE.ShaderMaterial({
+        uniforms: { uT: { value: 0 } }, vertexShader: SK_VERT, fragmentShader: SK_FRAG,
+        transparent: true, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3,
+      });
+      this.mesh = new THREE.Mesh(this.geo, this.mat);
+      this.mesh.frustumCulled = false; this.mesh.renderOrder = 2; this.mesh.name = 'skid_marks';
+    }
+    // quad from previous edge pair (L0,R0) to new pair (L1,R1); a0/a1 = alpha at the two ends
+    quad(t, y, l0x, l0z, r0x, r0z, l1x, l1z, r1x, r1z, a0, a1) {
+      const i = this.cur; this.cur = (i + 1) % this.cap;
+      const o = i * 12, p = this.pos, d = this.dat, q = i * 8;
+      p[o] = l0x; p[o + 1] = y; p[o + 2] = l0z; p[o + 3] = r0x; p[o + 4] = y; p[o + 5] = r0z;
+      p[o + 6] = l1x; p[o + 7] = y; p[o + 8] = l1z; p[o + 9] = r1x; p[o + 10] = y; p[o + 11] = r1z;
+      d[q] = t; d[q + 1] = a0; d[q + 2] = t; d[q + 3] = a0; d[q + 4] = t; d[q + 5] = a1; d[q + 6] = t; d[q + 7] = a1;
+      this.dirty = true;
+    }
+    flush() { if (this.dirty) { this.aPos.needsUpdate = true; this.aD.needsUpdate = true; this.dirty = false; } }
+    dispose() { this.geo.dispose(); this.mat.dispose(); }
+  }
+
   class FXHub {
     constructor(scene) {
       this.scene = scene; this.owners = []; this.round = -1; this.started = false;
       this.add = new PSys(2200, 1800, true);
       this.alpha = new PSys(900, 160, false);
       this.shadow = new ShadowSys(16);
+      this.skid = new SkidSys(3000); this.time = 0;
       this.root = new THREE.Group(); this.root.name = 'fx_hub';
-      this.root.add(this.shadow.mesh, this.alpha.mesh, this.add.mesh);
+      this.root.add(this.shadow.mesh, this.skid.mesh, this.alpha.mesh, this.add.mesh);
       scene.add(this.root);
     }
     acquire(o) { if (this.owners.indexOf(o) < 0) this.owners.push(o); }
@@ -273,7 +314,7 @@
       if (i >= 0) this.owners.splice(i, 1);
       if (!this.owners.length) {
         this.scene.remove(this.root);
-        this.add.dispose(); this.alpha.dispose(); this.shadow.dispose();
+        this.add.dispose(); this.alpha.dispose(); this.shadow.dispose(); this.skid.dispose();
         hubs.delete(this.scene);
       }
     }
@@ -283,6 +324,7 @@
         this.round++; this.started = true;
         this.add.begin(dt); this.alpha.begin(dt);
         this.add.flush(); this.alpha.flush();
+        this.time += dt; this.skid.mat.uniforms.uT.value = this.time; this.skid.flush();
       }
       o._fxR = this.round;
     }
@@ -381,6 +423,43 @@
     group.add(ex[0], ex[1]);
     return { group, body, wheels, frontWheelPivots: pivots, frontSeat, rearSeat, front, rear, exhausts: ex };
   }
+
+  // ---- overlay arms for riders (the baked rider mesh has no separate arms); shown only while cheering / throwing / flailing ----
+  let armGeo = null;
+  const armMats = {};
+  function armMat(c) {
+    const k = new THREE.Color(c).getHexString();
+    return armMats[k] || (armMats[k] = new THREE.MeshLambertMaterial({ color: new THREE.Color(c) }));
+  }
+  function addArms(rider) {
+    if (!rider || rider.userData.arms) return;
+    if (!armGeo) {
+      armGeo = { up: new THREE.CylinderGeometry(0.07, 0.085, 0.3, 7), hand: new THREE.SphereGeometry(0.11, 8, 6) };
+      armGeo.up.translate(0, 0.15, 0);
+    }
+    const id = (rider.name || '').replace('rider_', '');
+    const ch = G.CHARACTERS && G.CHARACTERS.find((c) => c.id === id);
+    const cc = ch ? ch.colors : { primary: 0xdd3333, skin: 0xffcc99 };
+    const arms = [];
+    for (let side = -1; side <= 1; side += 2) {
+      const pv = new THREE.Group();
+      pv.position.set(side * 0.34, 0.5, 0.04);
+      const up = new THREE.Mesh(armGeo.up, armMat(cc.primary));
+      const hd = new THREE.Mesh(armGeo.hand, armMat(cc.skin));
+      hd.position.y = 0.34;
+      pv.add(up, hd);
+      pv.visible = false;
+      rider.add(pv);
+      arms.push(pv);
+    }
+    rider.userData.arms = arms; // [right (-x), left (+x)]
+    rider.userData.by = rider.position.y;
+    rider.userData.bs = rider.scale.x;
+  }
+
+  // item ids used instantly (fist pump) vs thrown / dropped (wind-up + throw)
+  const INSTANT_ITEM = { mushroom: 1, mushroom3: 1, mushroom_gold: 1, star: 1, lightning: 1, chomp: 1 };
+  let evHooked = false;
 
   class Kart {
     constructor(opts) {
@@ -502,6 +581,18 @@
       this._frame = 0;
       this._emitSide = 0;
       this._hue = 0;
+      // v5 liveliness state
+      this._t = 0; this._ph = (this.index * 1.7 + Math.random() * 6.28);
+      this._sq = 0; this._sqV = 0; this._sus = 0; this._susV = 0; this._wh = 0; this._whV = 0;
+      this._pitchDyn = 0; this._prevSpeed = 0; this._prevVyG = 0; this._prevPy = 0;
+      this._landVy = 0; this._wasAir = false; this._airVy = 0; this._prevHop = 0;
+      this._dizzy = 0; this._flipLanded = false; this._spinTurns = 1; this._hitFx = 0;
+      this._cheerT = 0; this._cheerDur = 1; this._cheerK = 0; this._cheerCd = 0;
+      this._throwT = 0; this._throwBack = false; this._throwInstant = false;
+      this._slump = 0; this._look = [0, 0, 0]; this._lookCd = 0; this._lookB = 0; this._lbk = 0;
+      this._armW = [0, 0]; this._prevHeld0 = null; this._prevHeld1 = null; this._prevPos = 0; this._rev = 0; this._popT = 0;
+      this._sk = new Float32Array(16); this._skOn = new Uint8Array(2);
+      this._revAI = Math.random() < 0.6; this._holdW = 0;
 
       // model
       let model = null;
@@ -518,6 +609,14 @@
       model.group.rotation.order = 'YXZ';
       this.mesh.add(model.group);
       this._bodyBaseY = model.body ? model.body.position.y : 0;
+      // suspended parts (move relative to the wheels): body, chrome, seats -> [obj, baseY, obj, baseY, ...]
+      this._susp = [];
+      model.group.traverse((o) => { if (o === model.body || o === model.frontSeat || o === model.rearSeat || o.name === 'kartChrome') this._susp.push(o, o.position.y); });
+      addArms(model.front); addArms(model.rear);
+      if (!evHooked && G.events && G.events.on) {
+        evHooked = true;
+        G.events.on('itemUsed', (d) => { if (d && d.kart && d.kart._onItemUsed) d.kart._onItemUsed(d.item); });
+      }
 
       // clone materials of body for star flashing
       this._emMats = [];
@@ -596,7 +695,7 @@
 
     _endDrift(release) {
       if (this.drifting && release) {
-        if (this.driftLevel >= 1) { if (this._fx) this._fxMiniTurbo(); this._boost(MT_TIME, 1, false); this._snd('mini_turbo1'); }
+        if (this.driftLevel >= 1) { if (this._fx) this._fxMiniTurbo(); this._boost(MT_TIME, 1, false); this._snd('mini_turbo1'); this._cheer(0.7, 0); this._popT = 0.4; this._whV -= 1.4; }
       }
       this.drifting = false;
       this.driftDir = 0;
@@ -607,7 +706,7 @@
     }
 
     _boost(seconds, power, sound) {
-      if (this._fx && this.boostTimer <= 0.05) this._fxBoostPop(power);
+      if (this._fx && this.boostTimer <= 0.05) { this._fxBoostPop(power); this._whV -= 1.6 * Math.min(1.4, power); }
       if (seconds >= this.boostTimer || power > this.boostPower) {
         if (this.boostTimer <= 0 || power >= this.boostPower) this.boostPower = power;
       }
@@ -622,9 +721,9 @@
     }
 
     rocketStart(level) {
-      if (level >= 2) this._boost(1.2, 1, true);
-      else if (level === 1) this._boost(0.6, 1, true);
-      else if (level < 0) { this.burnoutTimer = 1.0; this.stallTimer = 1.0; this.speed = 0; }
+      if (level >= 2) { this._boost(1.2, 1, true); this._whV -= 3.2; this._cheer(1.0, 1); }
+      else if (level === 1) { this._boost(0.6, 1, true); this._whV -= 1.6; this._cheer(0.7, 0); }
+      else if (level < 0) { this.burnoutTimer = 1.0; this.stallTimer = 1.0; this.speed = 0; this._slump = 0.8; }
     }
 
     hit(kind) {
@@ -634,6 +733,10 @@
       this._endDrift(false);
       this.boostTimer = 0;
       this.hitKind = kind;
+      this._dizzy = 1.0; this._cheerT = 0; this._throwT = 0;
+      this._flipLanded = false;
+      this._spinTurns = Math.abs(this.speed) > 0.65 * this.stats.topSpeed ? 2 : 1;
+      if (this._fx) this._fxHit(kind);
       if (kind === 'spin') {
         this.spinTimer = this._spinDur = SPIN_TIME;
         this.speed *= 0.15;
@@ -687,6 +790,35 @@
       this.y = rp.y;
     }
 
+    // ------------------------------------------------------------ liveliness helpers
+    // kind 0: quick hop + fist pump, 1: both arms up (big cheer)
+    _cheer(dur, kind) {
+      if (this.ghost || this.spinTimer > 0 || this.squishTimer > 0) return;
+      if (this._cheerT > 0 && this._cheerK > kind && this._cheerT > dur) return;
+      this._cheerT = dur; this._cheerDur = dur; this._cheerK = kind;
+    }
+
+    _onItemUsed(item) {
+      if (this.ghost) return;
+      this._throwInstant = !!(INSTANT_ITEM[item] || (item && item.indexOf('mushroom') === 0));
+      this._throwBack = !!this.input.throwBack;
+      this._throwT = this._throwInstant ? 0.5 : 0.55;
+      if (this._throwInstant) this._cheer(0.6, 0);
+    }
+
+    // the human whose input drives this kart (for look-back / countdown rev)
+    _humanState() {
+      const gm = G.Game;
+      if (!gm || !gm.humans || !G.Input) return null;
+      for (let i = 0; i < gm.humans.length; i++) {
+        const h = gm.humans[i];
+        if (h.kart !== this) continue;
+        const pl = G.Input.players, idx = this.coop ? this.coop.driver : (h.players ? h.players[0] : 0);
+        return (pl && pl[idx] && pl[idx].state) || G.Input.state;
+      }
+      return null;
+    }
+
     swap() {
       if (this._swapCd > 0 || this.falling) return;
       this._swapCd = 0.4;
@@ -717,18 +849,25 @@
       const m = this.model;
       this._swapAnim -= dt;
       const p = clamp(1 - this._swapAnim / 0.35, 0, 1);
-      const arc = Math.sin(p * Math.PI) * 1.0;
+      const sw = Math.sin(p * Math.PI);
+      const arc = sw * 1.25;
+      const side = sw * 0.42;
       const fs = m.frontSeat.position, rs = m.rearSeat.position;
       // A: front -> rear
       this._swA.position.set(
-        fs.x + (rs.x - fs.x) * p + this._swALocal.x,
+        fs.x + (rs.x - fs.x) * p + this._swALocal.x - side,
         fs.y + (rs.y - fs.y) * p + arc + this._swALocal.y,
         fs.z + (rs.z - fs.z) * p + this._swALocal.z);
       this._swB.position.set(
-        rs.x + (fs.x - rs.x) * p + this._swBLocal.x,
-        rs.y + (fs.y - rs.y) * p + arc * 1.25 + this._swBLocal.y,
+        rs.x + (fs.x - rs.x) * p + this._swBLocal.x + side,
+        rs.y + (fs.y - rs.y) * p + arc * 1.3 + this._swBLocal.y,
         rs.z + (fs.z - rs.z) * p + this._swBLocal.z);
       this._swA.rotation.y = p * TAU; this._swB.rotation.y = -p * TAU;
+      // somersault-ish tuck + stretch while airborne, squash on touchdown
+      this._swA.rotation.x = -sw * 0.6; this._swB.rotation.x = -sw * 0.6;
+      this._swA.rotation.z = sw * 0.35; this._swB.rotation.z = -sw * 0.35;
+      const st = p > 0.85 ? 1 - Math.sin((p - 0.85) / 0.15 * Math.PI) * 0.22 : 1 + sw * 0.12;
+      this._swA.scale.y = this._swB.scale.y = (this._swA.userData.bs || 1) * st;
       if (this._swapAnim <= 0) this._finishSwap();
     }
 
@@ -736,7 +875,9 @@
       const m = this.model;
       this._swapAnim = 0;
       if (!this._swA) return;
-      this._swA.rotation.y = 0; this._swB.rotation.y = 0;
+      this._swA.rotation.set(0, 0, 0); this._swB.rotation.set(0, 0, 0);
+      this._swA.scale.y = this._swA.userData.bs || this._swA.scale.x; this._swB.scale.y = this._swB.userData.bs || this._swB.scale.x;
+      this._cheer(0.45, 0);
       m.rearSeat.add(this._swA);
       m.frontSeat.add(this._swB);
       this._swA.position.copy(this._swALocal);
@@ -850,6 +991,7 @@
         if (this.scene) this.scene.add(this._drone);
       }
       this._drone.visible = true;
+      this._fxBubbles(16);
       this._snd('hop');
       return true;
     }
@@ -1088,6 +1230,7 @@
         const u = this.drafting01;
         A.spawn(0, 1, this._wx(-ah, sd), py + 0.25 + rnd() * 0.9, this._wz(-ah, sd), -sn * 30, 0, -cs * 30, 0.32, 0.09, 0.04, 0.85, 0.95, 1, 0.55 + 0.4 * u, 0, 0);
       }
+      this._updateFx2(dt, burn, spd01);
     }
 
     // world offset from kart center: back distance, side (right +)
@@ -1336,6 +1479,8 @@
           if (this.speed < 0) dh = 0;
           this.heading += dh * 0.35;
           if (this._wallSnd <= 0) { this._wallSnd = 0.4; this._snd('wall'); }
+          if (this._fx) this._fxWall(sgn, into);
+          this._sqV -= 1.5 * into; this._susV -= 0.5 * into;
           this._endDrift(false);
         }
       }
@@ -1349,7 +1494,7 @@
         this._snd('fall');
         return;
       }
-      if (surf === 'water' && this._lastSurf !== 'water' && !this.airborne) this._snd('splash');
+      if (surf === 'water' && this._lastSurf !== 'water' && !this.airborne) { this._snd('splash'); if (this._fx && Math.abs(this.speed) > 4) this._fxLand(10); }
       this._lastSurf = surf;
       if (this.airborne) {
         if (surf === 'void') {
@@ -1428,15 +1573,24 @@
       const ti = this.trackInfo;
       const sp = this.speed;
       const spd01 = clamp(Math.abs(sp) / this.stats.topSpeed, 0, 1.5);
+      const rnd = Math.random;
       this.y = this.pos.y;
+      this._t += dt;
+      const t = this._t;
+      if (this._cheerT > 0) this._cheerT -= dt;
+      if (this._cheerCd > 0) this._cheerCd -= dt;
+      if (this._throwT > 0) this._throwT -= dt;
+      const hitting = this.spinTimer > 0 || this.squishTimer > 0;
+      if (!hitting && this._dizzy > 0) this._dizzy -= dt;
 
       // smooth values
       this._steerVis = damp(this._steerVis, steer, 12, dt);
       this._driftVis = damp(this._driftVis, this.drifting ? 1 : 0, 10, dt);
       const ddir = this.drifting ? this.driftDir : (this._lastDir || 0);
       if (this.drifting) this._lastDir = this.driftDir;
-      this._leanF = damp(this._leanF, this._steerVis * 0.18 + ddir * 0.22 * this._driftVis, 10, dt);
-      this._leanR = damp(this._leanR, this._steerVis * 0.18 + ddir * 0.22 * this._driftVis, 5, dt);
+      // riders lean into turns, much harder while drifting (driver leads, thrower follows a beat later)
+      this._leanF = damp(this._leanF, this._steerVis * 0.24 + ddir * 0.44 * this._driftVis, 10, dt);
+      this._leanR = damp(this._leanR, this._steerVis * 0.18 + ddir * 0.3 * this._driftVis, 5, dt);
 
       // slope pitch
       const gy = ti.y;
@@ -1449,30 +1603,88 @@
       }
       this._prevGround = gy;
       this._pitch = damp(this._pitch, clamp(pitchT, -0.5, 0.5), 8, dt);
-      const rollT = -this._steerVis * 0.05 * Math.min(spd01, 1) - ddir * 0.1 * this._driftVis;
-      this._roll = damp(this._roll, rollT, 10, dt);
+      const rollT = -this._steerVis * 0.085 * Math.min(spd01, 1) - ddir * 0.15 * this._driftVis;
+      this._roll = damp(this._roll, rollT, 9, dt);
+
+      // longitudinal acceleration -> nose dips when braking / lifts when accelerating or boosting
+      if (dt > 0) {
+        const acc = (sp - this._prevSpeed) / dt;
+        this._pitchDyn = damp(this._pitchDyn, clamp(-acc * 0.0042, -0.07, 0.13), 9, dt);
+      }
+      this._prevSpeed = sp;
+
+      // landing detection (jump / flip landings squash the kart and kick up dust)
+      const air = this.airborne && !this.falling;
+      if (air) this._airVy = this.vy;
+      if (this._wasAir && !this.airborne && !this.falling && !this.cannonFlight) {
+        const iv = Math.max(0, -this._airVy);
+        if (iv > 2.5) this._onLand(iv);
+      }
+      this._wasAir = air;
+      if (this._prevHop > 0 && this._hopTimer <= 0 && !this.airborne) { this._sqV -= 2.2; this._susV -= 0.7; if (this._fx && spd01 > 0.2) this._fxLand(3); }
+      this._prevHop = this._hopTimer;
+
+      // squash & stretch spring (stretch while rising, squash on landing)
+      let sqT = 0;
+      if (air) sqT = clamp(this._airVy * 0.007, -0.06, 0.12);
+      else if (this._hopTimer > 0) sqT = (1 - this._hopTimer / HOP_TIME) < 0.5 ? 0.05 : -0.025;
+      this._sqV += (-(this._sq - sqT) * 220 - this._sqV * 11) * dt;
+      this._sq = clamp(this._sq + this._sqV * dt, -0.5, 0.3);
+
+      // suspension: body hangs on a spring; bumps, kerbs, offroad and landings excite it
+      if (!air && !this.falling && !this.cannonFlight && dt > 0) {
+        const vyG = (this.pos.y - this._prevPy) / dt;
+        this._susV -= clamp(vyG - this._prevVyG, -25, 25) * 0.011;
+        this._prevVyG = vyG;
+        const rough = (SURF_MUL[ti.surface] || !ti.onRoad) ? 3.2 : 0.35;
+        this._susV += (rnd() - 0.5) * Math.min(spd01, 1) * rough;
+      } else this._prevVyG = 0;
+      this._prevPy = this.pos.y;
+      this._susV += (-this._sus * 190 - this._susV * 11) * dt;
+      this._sus = clamp(this._sus + this._susV * dt, -0.14, 0.12);
+
+      // wheelie spring (rocket start / boost start / mini-turbo kick the nose up)
+      this._whV += (-this._wh * 55 - this._whV * 6.5) * dt;
+      this._wh = clamp(this._wh + this._whV * dt, -0.6, 0.06);
 
       // hop
       let hopY = 0;
       if (this._hopTimer > 0) hopY = HOP_H * Math.sin(Math.PI * (1 - this._hopTimer / HOP_TIME));
 
       // hit anims
-      let spinAng = 0, flipAng = 0, flipY = 0, sy = 1, fallY = 0;
+      let spinAng = 0, flipAng = 0, rollAng = 0, flipY = 0, sy = 1, widen = 1, fallY = 0;
       if (this.spinTimer > 0) {
         const p = 1 - this.spinTimer / (this.hitKind === 'flip' ? this._flipDur : this._spinDur);
         if (this.hitKind === 'flip') {
-          const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
-          flipAng = e * TAU;
-          flipY = (p < 0.8 ? Math.sin(p / 0.8 * Math.PI) : 0) * 2.2;
-          spinAng = 0;
+          const AIR = 0.78;
+          if (p < AIR) {
+            const q = p / AIR, r = q * q * (3 - 2 * q);
+            flipY = 2.5 * 4 * q * (1 - q);
+            flipAng = r * TAU; rollAng = r * TAU;
+          } else {
+            const u = (p - AIR) / (1 - AIR);
+            if (!this._flipLanded) {
+              this._flipLanded = true; this._sq = -0.42; this._sqV = 0; this._susV -= 1.4;
+              if (this._fx) this._fxLand(14);
+              this._snd('bump');
+            }
+            flipY = 0.5 * Math.sin(u * Math.PI) * (1 - u);
+          }
         } else {
           const e = 1 - Math.pow(1 - p, 3);
-          spinAng = e * TAU * 1.1;
+          spinAng = e * TAU * this._spinTurns;
+          flipY = 0.28 * Math.sin(Math.min(1, p * 3.2) * Math.PI);
+          rollAng = Math.sin(p * TAU * 2 * this._spinTurns) * 0.1 * (1 - p);
         }
       }
       if (this.squishTimer > 0) {
         const left = this.squishTimer;
-        sy = left > 0.4 ? 0.2 : 0.2 + 0.8 * (1 - left / 0.4);
+        if (left > 0.6) sy = 0.2 + Math.sin(t * 34) * 0.015;
+        else {
+          const q = 1 - left / 0.6, x1 = q - 1;
+          sy = 0.2 + 0.8 * (1 + 3.2 * x1 * x1 * x1 + 2.2 * x1 * x1);   // ease-out-back: pops past 1 and settles
+        }
+        widen = 1 + (1 - sy) * 0.45;
       }
       if (this.falling) {
         fallY = -0.5 * this._fallTimer * this._fallTimer * 6;
@@ -1485,6 +1697,19 @@
         flipAng = -Math.sin(u * Math.PI) * 0.4;
       }
 
+      // engine shake (idle / countdown / revving)
+      let rev = 0;
+      const gm = G.Game;
+      if (this.burnoutTimer > 0) rev = 1;
+      else if (gm && (gm.state === 'countdown' || gm.state === 'intro')) {
+        const hs = this._humanState();
+        rev = hs ? (hs.accel ? 1 : 0) : (this._revAI ? 0.35 + 0.35 * Math.sin(t * 9 + this._ph) : 0);
+      }
+      this._rev = damp(this._rev, rev, 10, dt);
+      const idle = !air && !this.falling && Math.abs(sp) < 2.5 && !hitting && !this.rescued && !this.cannonFlight;
+      const shake = idle ? 0.005 + 0.018 * this._rev : spd01 * 0.003;
+      const shx = (rnd() - 0.5) * 2 * shake, shz = (rnd() - 0.5) * 2 * shake;
+
       // mesh transform
       const mesh = this.mesh;
       const targetScale = this.shrinkTimer > 0 ? 0.5 : 1;
@@ -1492,13 +1717,16 @@
       mesh.scale.set(this._scale, this._scale, this._scale);
       mesh.position.copy(this.pos);
       mesh.rotation.y = this.heading;
-      mesh.rotation.x = this._pitch;
-      mesh.rotation.z = this._roll + (this._wobble > 0 ? this._wobbleDir * Math.sin(this._wobble * 36) * 0.12 * Math.min(1, this._wobble * 4) : 0);
+      mesh.rotation.x = this._pitch + this._pitchDyn;
+      mesh.rotation.z = this._roll + (this._wobble > 0 ? this._wobbleDir * Math.sin(this._wobble * 36) * 0.12 * Math.min(1, this._wobble * 4) : 0) + (idle ? shx * 0.5 : 0);
       const g = m.group;
-      g.position.y = hopY + flipY + (this.falling ? 0 : 0);
+      const wh = this._wh, swh = Math.sin(wh), cwh = Math.cos(wh);
+      g.position.set(shx, hopY + flipY + (0.3 - 0.3 * cwh - 0.75 * swh), shz + (-0.75 - 0.3 * swh + 0.75 * cwh));
       g.rotation.y = -ddir * 0.44 * this._driftVis + spinAng;
-      g.rotation.x = flipAng;
-      g.scale.set(1, sy, 1);
+      g.rotation.x = flipAng + wh;
+      g.rotation.z = rollAng;
+      const sqx = (1 - this._sq * 0.5) * widen, sqy = (1 + this._sq) * sy;
+      g.scale.set(sqx, sqy, sqx);
       if (this.falling) { g.position.y = 0; }
 
       // invuln flash (not for star)
@@ -1523,33 +1751,385 @@
       // wheels
       const burn = this.burnoutTimer > 0;
       this._wheelSpin += (burn ? 40 : sp) * dt / 0.35;
-      const wh = m.wheels;
-      for (let i = 0; i < wh.length; i++) wh[i].rotation.x = this._wheelSpin;
+      const whs = m.wheels;
+      for (let i = 0; i < whs.length; i++) whs[i].rotation.x = this._wheelSpin;
       const pv = m.frontWheelPivots;
       const steerAng = -(this.drifting ? this.driftDir * 0.5 + this._steerVis * 0.3 : this._steerVis) * 0.45;
       for (let i = 0; i < pv.length; i++) pv[i].rotation.y = steerAng;
 
-      // bob
-      if (m.body) m.body.position.y = this._bodyBaseY + (this.airborne || this.falling ? 0 : Math.sin(this._frame * 0.55) * 0.015 * Math.min(spd01, 1));
+      // suspended parts ride the spring (wheels stay planted)
+      const sus = this._susp, so = this._sus;
+      for (let i = 0; i < sus.length; i += 2) sus[i].position.y = sus[i + 1] + so;
 
-      // riders lean
-      if (m.front && this._swapAnim <= 0) { m.front.rotation.z = this._leanF; }
-      if (m.rear && this._swapAnim <= 0) {
-        if (this._slapAnim > 0) {
-          const p = 1 - this._slapAnim / SLAP_ANIM;
-          const sw = Math.sin(Math.min(1, p * 1.25) * Math.PI);
-          m.rear.rotation.z = this._slapSide * 1.15 * sw;
-          m.rear.rotation.y = this._slapSide * 0.9 * sw;
-          m.rear.rotation.x = -0.25 * sw;
-        } else {
-          m.rear.rotation.z = this._leanR * 0.8;
-          m.rear.rotation.y = 0; m.rear.rotation.x = 0;
-        }
-      }
+      this._riders(dt, spd01, hitting, ddir);
 
       // visual FX (boost flames, drift sparks, dust, shadow ...)
       this._gy = gy;
       this._updateFx(dt, burn, spd01);
+    }
+
+    // ------------------------------------------------------------ rider animation
+    _arm(rider, a, th, out, w) {
+      const arm = rider.userData.arms && rider.userData.arms[a];
+      if (!arm) return;
+      if (w < 0.03) { arm.visible = false; return; }
+      arm.visible = true;
+      const wc = w > 1 ? 1 : w;
+      arm.scale.setScalar(0.35 + 0.65 * wc);
+      const sg = a ? -1 : 1;
+      arm.rotation.x = 2.2 + (th - 2.2) * wc;
+      arm.rotation.z = sg * (0.15 + (out - 0.15) * wc);
+    }
+
+    _riders(dt, spd01, hitting, ddir) {
+      const m = this.model, t = this._t, fr = this._frame;
+      const swapping = this._swapAnim > 0;
+      const rnd = Math.random;
+      const hs = this._humanState();
+      const lookBack = !!(hs && hs.lookBack) && !hitting;
+      this._lbk = damp(this._lbk, lookBack ? 1 : 0, 9, dt);
+
+      // ---- reactions
+      const h0 = this.heldItems[0], h1 = this.heldItems[1];
+      if (this._swapCd <= 0 && ((h0 && !this._prevHeld0) || (h1 && !this._prevHeld1))) this._cheer(0.55, 0);
+      this._prevHeld0 = h0; this._prevHeld1 = h1;
+      if (this._prevPos > 0 && this.position > 0 && this.position < this._prevPos && this._cheerCd <= 0 && !this.finished && spd01 > 0.4 && !hitting) { this._cheer(0.8, 0); this._cheerCd = 3; }
+      this._prevPos = this.position;
+      if (this.finished && !this._finDone) {
+        this._finDone = true;
+        if (this.position <= 5) { this._cheerT = this._cheerDur = 60; this._cheerK = 1; }
+      }
+      const loser = this.finished && this.position > 5;
+      const slumpT = hitting ? 1 : this._dizzy > 0 ? 0.55 : loser ? 0.75 : this.burnoutTimer > 0 ? 0.5 : 0;
+      this._slump = damp(this._slump, slumpT, hitting ? 16 : 4, dt);
+      const slump = this._slump;
+
+      // neighbours: driver glances at the nearest kart beside us, thrower checks who is behind
+      if (((fr + this.index) & 3) === 0) {
+        const ks = Kart._karts;
+        const sn = Math.sin(this.heading), cs = Math.cos(this.heading);
+        let bs = 1e9, bb = 1e9, ys = 0, yb = 0;
+        if (ks) for (let i = 0; i < ks.length; i++) {
+          const o = ks[i];
+          if (!o || o === this || o.ghost || o.falling) continue;
+          const dx = o.pos.x - this.pos.x, dz = o.pos.z - this.pos.z, d2 = dx * dx + dz * dz;
+          if (d2 > 225) continue;
+          const df = dx * sn + dz * cs, dl = dx * cs - dz * sn;
+          if (Math.abs(df) < 4 && d2 < 49 && d2 < bs) { bs = d2; ys = Math.atan2(dl, Math.max(0.4, df + 1.5)); }
+          else if (df < -2 && d2 < bb) { bb = d2; yb = Math.atan2(dl, df); }
+        }
+        this._look[0] = bs < 1e8 ? clamp(ys, -1.2, 1.2) : 0; this._look[2] = bs < 1e8 ? 1 : 0;
+        this._look[1] = bb < 1e8 ? clamp(yb, -2.2, 2.2) : 0; this._lookB = bb < 1e8 ? 1 : 0;
+      }
+
+      const dr = m.front, th = m.rear;
+      const cheerEnv = this._cheerT > 0 ? Math.min(1, (this._cheerDur - this._cheerT) * 12, this._cheerT * 7) : 0;
+      const cheerK = this._cheerK;
+      const flail = this.spinTimer > 0;
+      const holding = !!this.draggedItem && !hitting;
+      this._holdW = damp(this._holdW, holding ? 1 : 0, 12, dt);
+
+      // ---- thrower arm pose (throw sequence > hold)
+      let tArm = 2.2, tOut = 0.2, tW = 0, tYaw = 0, tTilt = 0;
+      if (this._holdW > 0.02) {
+        tArm = -1.0 + Math.sin(t * 7) * 0.07; tOut = 0.3; tW = this._holdW; tYaw = -0.75 * this._holdW; tTilt = -0.12 * this._holdW;
+      }
+      if (this._throwT > 0 && !this._throwInstant && !hitting) {
+        const e = 0.55 - this._throwT;
+        let a1, y1, tl, w1 = 1;
+        if (this._throwBack) {
+          if (e < 0.14) { const u = e / 0.14; a1 = -0.6 - 0.2 * u; y1 = -0.9 * u; tl = -0.1 * u; }
+          else if (e < 0.26) { const u = (e - 0.14) / 0.12; a1 = -0.8 - 0.95 * u; y1 = -0.9 - 0.4 * u; tl = -0.1 + 0.3 * u; }
+          else { a1 = -1.75; y1 = -1.3 * this._throwT / 0.29; tl = 0.2 * this._throwT / 0.29; w1 = Math.min(1, this._throwT / 0.2); }
+        } else if (e < 0.14) { const u = e / 0.14; a1 = -0.9 - 0.45 * u; y1 = -0.95 * u; tl = -0.3 * u; }
+        else if (e < 0.26) { const u = (e - 0.14) / 0.12, v = u * u * (3 - 2 * u); a1 = -1.35 + 2.85 * v; y1 = -0.95 + 1.5 * v; tl = -0.3 + 0.6 * v; }
+        else { const u = this._throwT / 0.29; a1 = 1.5; y1 = 0.55 * u; tl = 0.3 * u; w1 = Math.min(1, this._throwT / 0.2); }
+        tArm = a1; tYaw = y1; tTilt = tl; tW = w1; tOut = 0.2;
+      }
+
+      // ---- per rider
+      for (let role = 0; role < 2; role++) {
+        const r = role ? th : dr;
+        if (!r) continue;
+        const ud = r.userData, head = ud.head;
+        const by = ud.by !== undefined ? ud.by : 0, bs = ud.bs || 1;
+        const ph = this._ph + role * 1.9;
+        let aw = ud.aw || 0;
+
+        // arm targets
+        let wR = 0, wL = 0, thR = 2.2, thL = 2.2, outR = 0.3, outL = 0.3;
+        const wave = Math.sin(t * 17 + role * 1.7);
+        if (swapping) { wR = wL = 1; thR = 0.1 + wave * 0.25; thL = 0.1 - wave * 0.25; outR = outL = 0.7; }
+        else if (flail) { wR = wL = 1; thR = 0.8 + Math.sin(t * 18 + role * 1.3) * 0.9; thL = 0.8 + Math.sin(t * 21 + 2 + role) * 0.9; outR = 0.8 + Math.sin(t * 13) * 0.3; outL = 0.8 + Math.sin(t * 15) * 0.3; }
+        else if (cheerEnv > 0.02) {
+          wR = cheerEnv; thR = 0.05 + wave * 0.22; outR = 0.55 + cheerK * 0.3;
+          if (cheerK > 0.5) { wL = cheerEnv; thL = 0.05 - wave * 0.22; outL = outR; }
+        }
+        if (role === 1 && !swapping && !flail) {
+          if (tW > 0.02) { wR = Math.max(wR, tW); thR = wR === tW ? tArm : thR; outR = tOut; }
+        }
+        // driver steers with both hands up on the wheel when drifting: arms lowered, tiny counter-steer wiggle shown via twist
+        this._arm(r, 0, thR, outR, wR);
+        this._arm(r, 1, thL, outL, wL);
+
+        if (swapping) {
+          if (head) { head.rotation.y = 0; head.rotation.x = 0; head.rotation.z = 0; }
+          continue;
+        }
+
+        // body
+        let rx, ry, rz, py, sY = 1 + Math.sin(t * 2.3 + ph) * 0.014;
+        const bob = Math.sin(t * 5.5 + ph) * 0.006 + Math.sin(fr * 0.42 + ph) * 0.012 * Math.min(spd01, 1);
+        const bounce = cheerEnv > 0.02 ? Math.abs(Math.sin(t * (cheerK > 0.5 ? 11 : 15) + ph)) * (cheerK > 0.5 ? 0.16 : 0.12) * cheerEnv : 0;
+        rz = role ? this._leanR : this._leanF * 1.25;
+        rx = this._pitchDyn * 2.4 - this._wh * 0.5 + slump * 0.55 - cheerEnv * 0.2;
+        ry = 0;
+        if (role === 0) {
+          ry = ddir * 0.3 * this._driftVis - this._steerVis * 0.22 * this._driftVis + this._lbk * 0.9;
+        } else {
+          ry = this._lbk * -0.9;
+          if (this._slapAnim > 0) {
+            const p = 1 - this._slapAnim / SLAP_ANIM, sw = Math.sin(Math.min(1, p * 1.25) * Math.PI);
+            rz = this._slapSide * 1.15 * sw; ry = this._slapSide * 0.9 * sw; rx = -0.25 * sw;
+          } else if (tW > 0.02) { ry += tYaw; rx += tTilt; }
+        }
+        if (slump > 0.05 && flail) { rz += Math.sin(t * 14 + ph) * 0.4 * slump; rx += Math.sin(t * 11 + ph) * 0.25; }
+        py = by + bob + bounce + this._sus * 0.7 - slump * 0.11;
+        sY += cheerEnv * 0.05 * Math.sin(t * 22) + this._sus * 1.1 + this._sq * 0.45;
+        r.rotation.set(rx, ry, rz);
+        r.position.y = py;
+        r.scale.set(bs * (1 - (sY - 1) * 0.5), bs * sY, bs * (1 - (sY - 1) * 0.5));
+
+        // head: looks into the turn, glances at neighbours, nods, wobbles when dizzy
+        if (head) {
+          let yaw, hx = 0, hz = 0;
+          if (role === 0) {
+            yaw = -this._steerVis * 0.4 - ddir * 0.45 * this._driftVis;
+            if (this._look[2] > 0.5 && spd01 > 0.1) yaw = this._look[0] * 0.85;
+          } else {
+            yaw = holding ? -0.55 : -this._steerVis * 0.25;
+            if (this._lookB > 0.5 && !holding && spd01 > 0.1) yaw = this._look[1] * 0.75;
+          }
+          if (Math.abs(this.speed) < 3) yaw += Math.sin(t * 0.8 + ph) * 0.35;
+          yaw += this._lbk * (role ? -1.2 : 1.7);
+          if (cheerEnv > 0.02) { hx = -0.25 * cheerEnv; hz = Math.sin(t * 9 + ph) * 0.13 * cheerEnv; }
+          hx += slump * 0.5;
+          if (this._dizzy > 0 || hitting) { const dz = hitting ? 1 : clamp(this._dizzy * 1.5, 0, 1); hz += Math.sin(t * 6.5 + ph) * 0.22 * dz; hx += Math.sin(t * 5 + ph + 1) * 0.18 * dz; yaw += Math.sin(t * 4 + ph) * 0.4 * dz; }
+          const k = 1 - Math.exp(-11 * dt);
+          head.rotation.y += (yaw - head.rotation.y) * k;
+          head.rotation.x += (hx - head.rotation.x) * k;
+          head.rotation.z += (hz - head.rotation.z) * k;
+        }
+      }
+    }
+
+    // ------------------------------------------------------------ landing / hit fx helpers
+    _onLand(iv) {
+      this._sqV -= Math.min(9, iv * 0.55);
+      this._susV -= Math.min(2, iv * 0.12);
+      if (this._fx) this._fxLand(iv);
+    }
+
+    // dust colour per surface into RGB
+    _dustCol() {
+      const sf = this.trackInfo.surface;
+      if (sf === 'sand') { RGB[0] = 0.9; RGB[1] = 0.78; RGB[2] = 0.52; }
+      else if (sf === 'mud') { RGB[0] = 0.32; RGB[1] = 0.22; RGB[2] = 0.12; }
+      else if (sf === 'grass' || (!this.trackInfo.onRoad && sf === 'offroad')) { RGB[0] = 0.5; RGB[1] = 0.55; RGB[2] = 0.3; }
+      else if (sf === 'water') { RGB[0] = 0.8; RGB[1] = 0.92; RGB[2] = 1; }
+      else if (sf === 'ice') { RGB[0] = 0.9; RGB[1] = 0.95; RGB[2] = 1; }
+      else { RGB[0] = 0.74; RGB[1] = 0.71; RGB[2] = 0.65; }
+    }
+
+    // expanding dust ring + radial puffs where the kart touches down
+    _fxLand(iv) {
+      const fx = this._fx;
+      if (!fx) return;
+      const S = fx.alpha, big = clamp(iv / 12, 0.3, 1.3), x = this.pos.x, y = this.pos.y + 0.1, z = this.pos.z, rnd = Math.random;
+      this._dustCol();
+      const r = RGB[0], g = RGB[1], b = RGB[2];
+      S.endColor(r, g, b);
+      S.spawn(2, 2, x, y, z, 0, 0, 0, 0.55, 1.2, 4.5 + 4 * big, r, g, b, 0.6, 0, 0);
+      const n = 8 + (big * 6 | 0);
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * TAU + rnd() * 0.5, sp = (3 + rnd() * 3) * (0.6 + big * 0.5);
+        S.endColor(r * 0.9, g * 0.9, b * 0.9);
+        S.spawn(3, 0, x + Math.cos(a) * 0.9, y, z + Math.sin(a) * 0.9, Math.cos(a) * sp, 0.6 + rnd() * 0.8, Math.sin(a) * sp, 0.6 + rnd() * 0.3, 0.5, 1.5 + big, r, g, b, 0.62, -0.2, 2.6);
+      }
+    }
+
+    _fxHit(kind) {
+      const fx = this._fx;
+      if (!fx) return;
+      const A = fx.add, S = fx.alpha, x = this.pos.x, y = this.pos.y + 0.7, z = this.pos.z, rnd = Math.random;
+      A.endColor(1, 0.5, 0.1);
+      A.spawn(1, 0, x, y, z, 0, 0, 0, 0.32, 1.1, 3.6, 1, 0.95, 0.6, 0.95, 0, 0);
+      A.endColor(1, 0.4, 0.05);
+      A.spawn(2, 2, x, y - 0.5, z, 0, 0, 0, 0.35, 1, 6.5, 1, 0.85, 0.4, 0.75, 0, 0);
+      for (let j = 0; j < 16; j++) {
+        const a = rnd() * TAU, sp = 5 + rnd() * 9;
+        A.endColor(1, 0.35, 0.05);
+        A.spawn(0, 1, x, y, z, Math.cos(a) * sp, 2 + rnd() * 6, Math.sin(a) * sp, 0.4 + rnd() * 0.3, 0.14, 0.04, 1, 0.9, 0.45, 1, 14, 0.5);
+      }
+      if (kind === 'squish') {
+        this._dustCol();
+        for (let j = 0; j < 8; j++) { const a = j / 8 * TAU; S.spawn(3, 0, x + Math.cos(a), this.pos.y + 0.15, z + Math.sin(a), Math.cos(a) * 3.5, 0.5, Math.sin(a) * 3.5, 0.6, 0.5, 1.8, RGB[0], RGB[1], RGB[2], 0.6, 0, 2); }
+      }
+    }
+
+    _fxWall(sgn, into) {
+      const fx = this._fx;
+      if (!fx || into < 0.15) return;
+      const A = fx.add, S = fx.alpha, rnd = Math.random;
+      const bx = this._wx(0.3, sgn * 0.95), bz = this._wz(0.3, sgn * 0.95), by = this.pos.y + 0.4;
+      const ti = this.trackInfo, n = 6 + (into * 10 | 0);
+      A.endColor(1, 0.3, 0.05);
+      A.spawn(1, 0, bx, by, bz, 0, 0, 0, 0.18, 0.5, 1.8, 1, 0.9, 0.5, 0.9, 0, 0);
+      for (let j = 0; j < n; j++) {
+        const sp = 4 + rnd() * 9;
+        A.endColor(1, 0.3, 0.04);
+        A.spawn(0, 1, bx, by, bz, -ti.rx * sgn * sp * 0.6 + ti.tx * (rnd() - 0.3) * sp, 1.5 + rnd() * 4, -ti.rz * sgn * sp * 0.6 + ti.tz * (rnd() - 0.3) * sp, 0.3 + rnd() * 0.25, 0.1, 0.03, 1, 0.85, 0.4, 1, 16, 0.4);
+      }
+      S.endColor(0.5, 0.5, 0.5);
+      S.spawn(3, 0, bx, by, bz, -ti.rx * sgn * 1.5, 0.6, -ti.rz * sgn * 1.5, 0.5, 0.4, 1.4, 0.7, 0.68, 0.62, 0.35, 0, 2);
+    }
+
+    // rescue drone pickup: ring bubbles + sparkles around the captured kart
+    _fxBubbles(n) {
+      const fx = this._fx;
+      if (!fx) return;
+      const S = fx.alpha, A = fx.add, rnd = Math.random, x = this.pos.x, y = this.pos.y, z = this.pos.z;
+      for (let i = 0; i < n; i++) {
+        const a = rnd() * TAU, rr = 0.4 + rnd() * 1.1;
+        S.endColor(0.85, 0.97, 1);
+        S.spawn(2, 0, x + Math.cos(a) * rr, y + 0.2 + rnd() * 1.4, z + Math.sin(a) * rr, (rnd() - 0.5) * 0.8, 1.4 + rnd() * 1.8, (rnd() - 0.5) * 0.8, 0.9 + rnd() * 0.5, 0.08, 0.3 + rnd() * 0.25, 0.55, 0.85, 1, 0.8, -0.5, 0.6);
+      }
+      for (let i = 0; i < n >> 1; i++) {
+        A.endColor(0.5, 0.8, 1);
+        A.spawn(1, 0, x + (rnd() - 0.5) * 1.8, y + 0.3 + rnd() * 1.4, z + (rnd() - 0.5) * 1.8, 0, 1 + rnd(), 0, 0.6, 0.3, 0.06, 0.8, 0.95, 1, 0.9, 0, 0);
+      }
+    }
+
+    // tire marks, wall scrape, spin smoke, dizzy stars, idle exhaust, clods, spray (called from _updateFx)
+    _updateFx2(dt, burn, spd01) {
+      const fx = this._fx, A = fx.add, S = fx.alpha, fr = this._frame, rnd = Math.random;
+      const ti = this.trackInfo, m = this.model, sp = this.speed;
+      const air = this.airborne || this.falling || this.cannonFlight || this.rescued;
+      const sn = Math.sin(this.heading), cs = Math.cos(this.heading), py = this.pos.y, sc = this._scale;
+      const sf = ti.surface;
+      const vyaw = this.heading + m.group.rotation.y, vs = Math.sin(vyaw), vc = Math.cos(vyaw);
+
+      // ---- skid marks (rear tires) on tarmac
+      {
+        let str = 0;
+        if (!air && ti.onRoad && !SURF_MUL[sf] && sf !== 'water') {
+          if (this.drifting && this._driftVis > 0.4 && spd01 > 0.3) str = this.driftLevel >= 1 ? 0.68 : 0.52;
+          else if (this.spinTimer > 0 && this.hitKind === 'spin') str = 0.5;
+          else if (this.input.brake > 0.5 && sp > 0.6 * this.stats.topSpeed) str = 0.34;
+        }
+        const sk = fx.skid, K = this._sk;
+        for (let w = 0; w < 2; w++) {
+          const o = w * 8;
+          if (str <= 0) { this._skOn[w] = 0; continue; }
+          const lx = (w ? 0.8 : -0.8) * sc, lz = -0.75 * sc;
+          const cx = this.pos.x + lx * vc + lz * vs, cz = this.pos.z - lx * vs + lz * vc;
+          if (!this._skOn[w]) { this._skOn[w] = 1; K[o] = cx; K[o + 1] = cz; K[o + 6] = 0; continue; }
+          const dx = cx - K[o], dz = cz - K[o + 1], d2 = dx * dx + dz * dz;
+          if (d2 < 0.3) continue;
+          if (d2 > 9) { K[o] = cx; K[o + 1] = cz; K[o + 6] = 0; continue; }
+          const d = Math.sqrt(d2), hw = 0.14 * sc, nx = -dz / d * hw, nz = dx / d * hw;
+          let plx, plz, prx, prz, a0 = str;
+          if (K[o + 6] > 0) { plx = K[o + 2]; plz = K[o + 3]; prx = K[o + 4]; prz = K[o + 5]; }
+          else { plx = K[o] + nx; plz = K[o + 1] + nz; prx = K[o] - nx; prz = K[o + 1] - nz; a0 = 0; }
+          const nlx = cx + nx, nlz = cz + nz, nrx = cx - nx, nrz = cz - nz;
+          sk.quad(fx.time, py + 0.045, plx, plz, prx, prz, nlx, nlz, nrx, nrz, a0, str);
+          K[o] = cx; K[o + 1] = cz; K[o + 2] = nlx; K[o + 3] = nlz; K[o + 4] = nrx; K[o + 5] = nrz; K[o + 6] = 1;
+        }
+      }
+
+      // ---- wall scrape sparks
+      if (!air && sp > 7 && ti.wallDist - Math.abs(ti.lateral) < 0.7 && sf !== 'void') {
+        const sg = ti.lateral > 0 ? 1 : -1;
+        const bx = this._wx(rnd() * 1.2 - 0.4, sg * 0.95), bz = this._wz(rnd() * 1.2 - 0.4, sg * 0.95), by = py + 0.25 + rnd() * 0.3;
+        for (let j = 0; j < 2; j++) {
+          const v = 3 + rnd() * 7;
+          A.endColor(1, 0.3, 0.04);
+          A.spawn(0, 1, bx, by, bz, -sn * v - ti.rx * sg * (1 + rnd() * 2), 1 + rnd() * 3, -cs * v - ti.rz * sg * (1 + rnd() * 2), 0.22 + rnd() * 0.2, 0.09, 0.03, 1, 0.9, 0.5, 1, 18, 0.4);
+        }
+        A.put(0, 0, bx, by, bz, 0.5, 1, 0.7, 0.25, 0.7, 0, 0, 0, 0);
+        if ((fr & 7) === 0) { S.endColor(0.5, 0.5, 0.5); S.spawn(3, 0, bx, by, bz, -sn * 2, 0.6, -cs * 2, 0.5, 0.3, 1.0, 0.7, 0.68, 0.62, 0.25, -0.3, 1.5); }
+      }
+
+      // ---- spin-out: tire smoke at all four wheels
+      if (this.spinTimer > 0 && this.hitKind === 'spin' && !air && (fr & 1) === 0) {
+        for (let w = 0; w < 4; w++) {
+          const lx = (w & 1 ? 0.8 : -0.8) * sc, lz = (w & 2 ? -0.75 : 0.75) * sc;
+          S.endColor(0.85, 0.85, 0.88);
+          S.spawn(3, 0, this.pos.x + lx * vc + lz * vs, py + 0.15, this.pos.z - lx * vs + lz * vc, (rnd() - 0.5) * 2.5, 0.8 + rnd() * 0.8, (rnd() - 0.5) * 2.5, 0.8, 0.6, 2.3, 0.92, 0.92, 0.94, 0.55, -0.3, 1.5);
+        }
+      }
+
+      // ---- dizzy stars orbiting the riders' heads
+      if (this._dizzy > 0 || this.spinTimer > 0 || this.squishTimer > 0) {
+        const kf = (this.spinTimer > 0 || this.squishTimer > 0) ? 1 : clamp(this._dizzy / 0.3, 0, 1);
+        for (let role = 0; role < 2; role++) {
+          const r = role ? m.rear : m.front;
+          const hd = r && r.userData.head;
+          if (!hd) continue;
+          const e = hd.matrixWorld.elements;
+          const hx = e[12], hy = e[13] + 0.5 * sc, hz = e[14];
+          for (let j = 0; j < 3; j++) {
+            const a = this._t * 7.5 + j * 2.094 + role * 1.3, rad = 0.46 * sc;
+            const yel = (j & 1) ? 0.4 : 0;
+            A.put(1, 0, hx + Math.cos(a) * rad, hy + Math.sin(a * 1.0) * 0.07, hz + Math.sin(a) * rad, 0.3 * sc + 0.04 * Math.sin(a * 3), 1, 0.9 + yel * 0.2, 0.2 + yel, 0.95 * kf, 0, 0, 0, a * 2);
+          }
+        }
+      }
+
+      // ---- idle / revving exhaust puffs + mini-turbo backfire pops
+      if (!air && Math.abs(sp) < 3 && this.boostTimer <= 0 && this.spinTimer <= 0) {
+        const per = this._rev > 0.4 ? 4 : 14;
+        if ((fr % per) === 0) {
+          const e = (fr >> 2) & 1 && this._exN > 1 ? 1 : 0;
+          this._exWorld(e, FX_W);
+          const rv = this._rev;
+          S.endColor(0.5, 0.5, 0.52);
+          S.spawn(3, 0, FX_W[0] - sn * 0.2, FX_W[1], FX_W[2] - cs * 0.2, -sn * (1 + rv * 2.5) + (rnd() - 0.5) * 0.5, 0.5 + rnd() * 0.4, -cs * (1 + rv * 2.5) + (rnd() - 0.5) * 0.5, 0.55, 0.15, 0.6 + rv * 0.5, 0.78 - rv * 0.3, 0.78 - rv * 0.3, 0.8 - rv * 0.3, 0.28 + rv * 0.3, -0.3, 1.2);
+          if (rv > 0.5 && (fr & 4) === 0) { A.endColor(1, 0.2, 0.02); A.spawn(0, 0, FX_W[0] - sn * 0.3, FX_W[1], FX_W[2] - cs * 0.3, -sn, 0, -cs, 0.1, 0.3, 0.12, 1, 0.7, 0.2, 0.8, 0, 0); }
+        }
+      }
+      if (this._popT > 0) {
+        this._popT -= dt;
+        if ((fr & 3) === 0) {
+          this._exWorld(rnd() < 0.5 ? 0 : (this._exN > 1 ? 1 : 0), FX_W);
+          const bx = FX_W[0] - sn * 0.35, bz = FX_W[2] - cs * 0.35;
+          A.endColor(1, 0.3, 0.02);
+          A.spawn(0, 0, bx, FX_W[1], bz, -sn * 2, 0, -cs * 2, 0.14, 0.9, 0.2, 1, 0.85, 0.35, 0.95, 0, 2);
+          A.spawn(1, 0, bx, FX_W[1], bz, 0, 0, 0, 0.12, 0.8, 0.3, 1, 0.9, 0.5, 0.9, 0, 0);
+          for (let j = 0; j < 4; j++) { A.endColor(1, 0.3, 0.04); A.spawn(0, 1, bx, FX_W[1], bz, -sn * (6 + rnd() * 6) + (rnd() - 0.5) * 3, (rnd() - 0.5) * 2, -cs * (6 + rnd() * 6) + (rnd() - 0.5) * 3, 0.2, 0.1, 0.03, 1, 0.8, 0.3, 1, 3, 0.5); }
+          S.endColor(0.3, 0.3, 0.3);
+          S.spawn(3, 0, bx, FX_W[1], bz, -sn * 3, 0.5, -cs * 3, 0.4, 0.2, 0.8, 0.35, 0.33, 0.32, 0.4, -0.2, 2);
+        }
+      }
+
+      // ---- offroad clods + water spray arcs
+      if (!air && spd01 > 0.25 && (fr & 1) === 0) {
+        const off = sf === 'grass' || sf === 'mud' || sf === 'sand' || (sf === 'offroad' && !ti.onRoad);
+        if (off) {
+          const side = (fr & 2) ? 0.78 : -0.78, bx = this._wx(0.9, side), bz = this._wz(0.9, side);
+          if (sf === 'mud') S.endColor(0.2, 0.12, 0.05);
+          const c0 = sf === 'mud' ? 0.3 : sf === 'sand' ? 0.8 : 0.3, c1 = sf === 'mud' ? 0.19 : sf === 'sand' ? 0.68 : 0.4, c2 = sf === 'mud' ? 0.09 : sf === 'sand' ? 0.4 : 0.12;
+          S.spawn(0, 0, bx, py + 0.15, bz, (rnd() - 0.5) * 4 - sn * 2, 3.5 + rnd() * 3.5, (rnd() - 0.5) * 4 - cs * 2, 0.7, 0.2, 0.14, c0, c1, c2, 0.95, 26, 0.1);
+        } else if (sf === 'water') {
+          for (let sd = -1; sd <= 1; sd += 2) {
+            const bx = this._wx(-0.7, sd * 0.8), bz = this._wz(-0.7, sd * 0.8);
+            for (let j = 0; j < 2; j++) { const v = 2 + rnd() * 3.5; A.spawn(0, 1, bx, py + 0.2, bz, -cs * sd * v - sn * 3, 5 + rnd() * 4, sn * sd * v - cs * 3, 0.65, 0.14, 0.05, 0.75, 0.93, 1, 0.85, 22, 0.15); }
+          }
+        }
+      }
+
+      // ---- rescue drone: bubbles while hauled
+      if (this.rescued && (fr & 3) === 0) this._fxBubbles(2);
     }
 
     dispose() {

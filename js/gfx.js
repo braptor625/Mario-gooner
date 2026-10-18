@@ -288,9 +288,43 @@
     });
   };
 
+  // ------------------------------------------------------------------ wind (opt-in vertex sway)
+  // GFX.patchWind(material, {strength=0.25 (m of sway at heightScale 1), heightScale=0.15 (per metre above
+  // groundY, sway ramps up with height, clamped to 1.5), groundY=0 (local-space y of the base), speed=1.6})
+  // Works for Mesh and InstancedMesh (world position phase). Patch the material BEFORE its first render.
+  const windTime = { value: 0 };
+  GFX.windTime = windTime;
+  GFX.patchWind = function (material, opts) {
+    if (!material || material._gfxWind) return material;
+    material._gfxWind = true;
+    opts = opts || {};
+    const u = {
+      windTime: windTime,
+      windStrength: { value: opts.strength !== undefined ? opts.strength : 0.25 },
+      windHeight: { value: opts.heightScale !== undefined ? opts.heightScale : 0.15 },
+      windGround: { value: opts.groundY !== undefined ? opts.groundY : 0 },
+      windSpeed: { value: opts.speed !== undefined ? opts.speed : 1.6 },
+    };
+    material.userData.wind = u;
+    chain(material, (shader) => {
+      Object.assign(shader.uniforms, u);
+      shader.vertexShader = 'uniform float windTime;\nuniform float windStrength;\nuniform float windHeight;\nuniform float windGround;\nuniform float windSpeed;\n' +
+        shader.vertexShader.replace('#include <begin_vertex>',
+          '#include <begin_vertex>\n' +
+          ' vec4 wwp = vec4( transformed, 1.0 );\n#ifdef USE_INSTANCING\n wwp = instanceMatrix * wwp;\n#endif\n wwp = modelMatrix * wwp;\n' +
+          ' float wH = clamp( ( transformed.y - windGround ) * windHeight, 0.0, 1.5 );\n' +
+          ' float wPh = windTime * windSpeed + wwp.x * 0.1 + wwp.z * 0.13;\n' +
+          ' float wAmt = windStrength * wH * wH;\n' +
+          ' transformed.x += ( sin( wPh ) + 0.35 * sin( wPh * 2.3 + 1.7 ) ) * wAmt;\n' +
+          ' transformed.z += cos( wPh * 0.9 + 0.6 ) * wAmt * 0.6;');
+    }, '|wind');
+    return material;
+  };
+
   GFX.update = function (dt) {
     GFX.time += dt;
     waterUniforms.time.value = GFX.time;
+    windTime.value = GFX.time;
   };
 
   // ------------------------------------------------------------------ post pipeline

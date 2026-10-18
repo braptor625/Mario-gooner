@@ -563,7 +563,7 @@
         const leg = new THREE.Mesh(legGeo, legMat); g.add(leg);
         const sh = new THREE.Mesh(shGeo, shMat); sh.position.y = 0.16; g.add(sh);
         const h = {
-          x: p[0], y: p[1], z: p[2], radius: 3.4, hitKind: 'squish', vx: 0, vz: 0, active: false, object3D: g,
+          x: p[0], y: p[1], z: p[2], radius: 3.4, hitKind: 'squish', vx: 0, vz: 0, active: false, launchable: false, object3D: g,
           update(dt, time) {
             let u = (time + off) % T_STOMP; if (u < 0) u += T_STOMP;
             let lift = UP_STOMP, sc = 0.35, act = false;
@@ -589,7 +589,7 @@
         const col1 = new THREE.Mesh(cg, sm), cap = new THREE.Mesh(sg, sm), puff = new THREE.Mesh(sg, sm);
         g.add(col1); g.add(cap); g.add(puff);
         const h = {
-          x: p[0], y: p[1], z: p[2], radius: 2.7, hitKind: 'flip', vx: 0, vz: 0, active: false, object3D: g,
+          x: p[0], y: p[1], z: p[2], radius: 2.7, hitKind: 'flip', vx: 0, vz: 0, active: false, launchable: false, object3D: g,
           update(dt, time) {
             let u = (time + off) % T_GEY; if (u < 0) u += T_GEY;
             let hh = 0.2 + 0.25 * (0.5 + 0.5 * Math.sin(time * 4 + off)), r = 1, act = false;
@@ -841,7 +841,7 @@
         const blk = new THREE.Mesh(smGeo, smMat); g.add(blk);
         const sh = new THREE.Mesh(shGeo, shMat); sh.position.y = 0.16; g.add(sh);
         out.push({
-          x: p[0], y: p[1], z: p[2], radius: 4.4, hitKind: 'squish', vx: 0, vz: 0, active: false, object3D: g,
+          x: p[0], y: p[1], z: p[2], radius: 4.4, hitKind: 'squish', vx: 0, vz: 0, active: false, launchable: false, object3D: g,
           update(dt, time) {
             let u = (time + off) % T_SMASH; if (u < 0) u += T_SMASH;
             let lift = UP_SMASH, sc = 0.45, act = false;
@@ -866,7 +866,7 @@
         for (const r of [-6.6, -4.4, -2.2, 2.2, 4.4, 6.6]) {
           const idx = bi++;
           out.push({
-            x: p[0], y: p[1] + 1.0, z: p[2], radius: 1.35, hitKind: 'spin', vx: 0, vz: 0, active: true, object3D: null,
+            x: p[0], y: p[1] + 1.0, z: p[2], radius: 1.35, hitKind: 'spin', vx: 0, vz: 0, active: true, launchable: false, object3D: null,
             update(dt, time) {
               const th = ph + time * w, c = Math.cos(th), s = Math.sin(th);
               this.x = p[0] + c * r; this.z = p[2] + s * r; this.vx = -s * r * w; this.vz = c * r * w;
@@ -883,7 +883,7 @@
       LF.fire.forEach(([d, dir], idx) => {
         const f = kit.frame(d), hw = f.halfWidth, l0 = -dir * (hw + 3.5), l1 = dir * (hw + 3.5), off = idx * 1.37, T = 3.3;
         out.push({
-          x: f.x, y: f.y, z: f.z, radius: 1.8, hitKind: 'spin', vx: 0, vz: 0, active: false, object3D: null,
+          x: f.x, y: f.y, z: f.z, radius: 1.8, hitKind: 'spin', vx: 0, vz: 0, active: false, launchable: false, object3D: null,
           update(dt, time) {
             let u = (time + off) % T; if (u < 0) u += T;
             const q = u / 2.1; let vis = false;
@@ -906,7 +906,7 @@
       const ml = (mouth[0] - sf.x) * sf.rx + (mouth[2] - sf.z) * sf.rz;
       for (let j = 0; j < NF; j++) {
         out.push({
-          x: sf.x, y: sf.y, z: sf.z, radius: 2.1, hitKind: 'spin', vx: 0, vz: 0, active: false, object3D: null,
+          x: sf.x, y: sf.y, z: sf.z, radius: 2.1, hitKind: 'spin', vx: 0, vz: 0, active: false, launchable: false, object3D: null,
           update(dt, time) {
             let u = (time + 0.0) % TF; if (u < 0) u += TF;
             const t0 = 1.3 + j * 0.3, q = (u - t0) / 2.0; let vis = false;

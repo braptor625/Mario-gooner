@@ -815,7 +815,7 @@
       const out = [], col = kit.col, L = kit.length;
       // Prickle Pillars: static bump hazards
       const spots = track._dd.pillarSpots;
-      for (const p of spots) out.push({ x: p[0], y: p[1], z: p[2], radius: 2.3, hitKind: 'bump', vx: 0, vz: 0, active: true });
+      for (const p of spots) out.push({ x: p[0], y: p[1], z: p[2], radius: 2.3, hitKind: 'bump', vx: 0, vz: 0, active: true, launchable: false });
       // dust devils
       const tb = new kit.Batch();
       for (let k = 0; k < 9; k++) {
@@ -831,7 +831,7 @@
         const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false;
         let px = 0, pz = 0, first = true;
         const h = {
-          x: 0, y: 0, z: 0, radius: 3.0, hitKind: 'flip', vx: 0, vz: 0, active: true, object3D: mesh,
+          x: 0, y: 0, z: 0, radius: 3.0, hitKind: 'flip', vx: 0, vz: 0, active: true, launchable: false, object3D: mesh,
           update(dt, time) {
             const d = d0 + Math.sin(time * w1 + ph) * A;
             frameInto(kit, ((d % L) + L) % L, o);

@@ -212,7 +212,7 @@
       head.position.set(0, 3.1, 0.2);
       const period = opts.period || 3.2;
       const h = {
-        x: g.position.x, y: fr.y + 1.5, z: g.position.z, radius: 1.5 * SC, hitKind: 'spin', vx: 0, vz: 0, active: true, object3D: g,
+        x: g.position.x, y: fr.y + 1.5, z: g.position.z, radius: 1.5 * SC, hitKind: 'spin', vx: 0, vz: 0, active: true, launchable: false, object3D: g,
         update(dt, time) {
           const ph = (((time + sp.phase) % period) + period) % period / period;
           // idle 0..0.55 (head bobs), lunge 0.55..0.8, snap back 0.8..1

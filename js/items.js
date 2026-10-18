@@ -129,6 +129,7 @@
   function resolveId(id) { return id === 'shell_triple' ? (Math.random() < 0.5 ? 'shell_green3' : 'shell_red3') : id; }
   const DRAGGABLE = {
     banana: 1, giant_banana: 1, fake_box: 1, bomb: 1, shell_green: 1, shell_red: 1, egg: 1, mega_shell: 1,
+    shell_green3: 1, shell_red3: 1,
   };
   const ENT_OF = {
     banana: 'banana', giant_banana: 'giant_banana', fake_box: 'fake_box', bomb: 'bomb',
@@ -155,7 +156,7 @@
 
   // DD-style distribution anchors (front / mid / back). Specials are added per slot owner.
   const W_FRONT = { banana: 30, shell_green: 28, fake_box: 16, mushroom: 8, shell_red: 6 };
-  const W_MID = { shell_red: 22, mushroom: 22, shell_green: 14, banana: 10, fake_box: 8, star: 3 };
+  const W_MID = { shell_red: 22, mushroom: 22, shell_green: 14, banana: 10, fake_box: 8, star: 5 };
   const W_BACK = { mushroom: 22, star: 18, shell_red: 14, shell_green: 6, banana: 3, fake_box: 3 };
   const W_BATTLE = { shell_green: 20, shell_red: 20, banana: 18, mushroom: 14, fake_box: 8, star: 8 };
   const ALL_KEYS = ['banana', 'shell_green', 'shell_red', 'mushroom', 'fake_box', 'star'];
@@ -1397,6 +1398,7 @@
       }
       this._updateEnts(dt);
       this._collide(dt);
+      this._hazardPass(dt);
       this._updateDrops(dt);
       this._fxBolts(dt);
       this._updateOrbits(dt);
@@ -1704,12 +1706,12 @@
           this._consume(k);
           break;
         case 'mushroom_gold':
-          st.goldT = 7; st.goldCd = 0.3;
+          st.goldT = 7.5; st.goldCd = 0.3;
           if (k.boost) k.boost(0.7);
           this._snd('boost', k);
           break;
         case 'star':
-          k.starTimer = 8;
+          k.starTimer = 7.5;
           this._snd('star', k);
           this._consume(k);
           break;
@@ -2060,6 +2062,68 @@
           this._destroyDrag(k, true);
           this._sndNear('shell_hit', d.x, d.z, 30);
           break;
+        }
+      }
+    }
+
+    // ---- track hazards (cars, critters, boulders...) vs star / chomp / mega shell (launch) and shells (destroyed)
+    _launchHaz(h, by, dx, dz, power) {
+      const tr = this.track;
+      if (!tr || !tr.launchHazard || !h.ref) return false;
+      const l = Math.sqrt(dx * dx + dz * dz) || 1;
+      const sp = power * (0.8 + Math.random() * 0.5);
+      const ok = tr.launchHazard(h.ref, (dx / l) * sp, 13 + Math.random() * 6 + power * 0.15, (dz / l) * sp);
+      if (ok) {
+        if (by && by.isPlayer) { this._snd('bump', by); this._snd('crowd', by); }
+        else this._sndNear('bump', h.x, h.z, 40);
+      }
+      return ok;
+    }
+
+    _hazardPass(dt) {
+      const tr = this.track;
+      if (!tr || !tr.getHazards || this.isArena) return;
+      const hz = tr.getHazards();
+      const nh = hz.length;
+      if (!nh) return;
+      const ents = this.ents, karts = this.karts;
+      // projectiles
+      for (let a = 0; a < ents.length; a++) {
+        const e = ents[a];
+        if (!e.active || e.state !== 'proj' || e.kind === 'spiny') continue;
+        const mega = e.kind === 'mega_shell';
+        for (let i = 0; i < nh; i++) {
+          const h = hz[i];
+          if (h.ref && h.ref._L) continue;
+          if (Math.abs(h.y - e.y) > 4 + h.radius) continue;
+          const dx = h.x - e.x, dz = h.z - e.z, rr = h.radius + (mega ? e.radius : 0.9);
+          if (dx * dx + dz * dz > rr * rr) continue;
+          if (mega) {
+            const sp = Math.sqrt(e.vx * e.vx + e.vz * e.vz) || 1;
+            this._launchHaz(h, e.owner, e.vx / sp * 0.8 + dx * 0.05, e.vz / sp * 0.8 + dz * 0.05, 20);
+          } else {
+            this._sndNear('shell_hit', e.x, e.z, 30);
+            this._free(e);
+            break;
+          }
+        }
+      }
+      // star / chomp karts
+      for (let j = 0; j < karts.length; j++) {
+        const k = karts[j], st = k._itm;
+        const chomp = st && st.chompT > 0, star = k.starTimer > 0;
+        if (!chomp && !star) continue;
+        const fx = Math.sin(k.heading), fz = Math.cos(k.heading), ky = this._kartY(k);
+        const reach = chomp ? 4.6 : 1.7;
+        const ccx = chomp ? k.pos.x + fx * 5 : k.pos.x, ccz = chomp ? k.pos.z + fz * 5 : k.pos.z;
+        for (let i = 0; i < nh; i++) {
+          const h = hz[i];
+          if (h.ref && h.ref._L) continue;
+          if (Math.abs(h.y - ky) > 4 + h.radius) continue;
+          const dx = h.x - ccx, dz = h.z - ccz, rr = h.radius + reach;
+          if (dx * dx + dz * dz > rr * rr) continue;
+          const sp = Math.max(8, Math.abs(k.speed || 0)) * 0.9 + 6;
+          this._launchHaz(h, k, fx * 0.8 + dx * 0.04, fz * 0.8 + dz * 0.04, sp);
         }
       }
     }
