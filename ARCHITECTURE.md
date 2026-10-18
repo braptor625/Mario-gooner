@@ -403,3 +403,21 @@ G.GFX.render(renderer, scene, views) // post pipeline: MSAA scene RT → bloom �
 ```
 Shadows (quality high, single-view): renderer.shadowMap PCFSoft; track.sun.castShadow handled by main;
 kart meshes castShadow=true, road/ground/scenery meshes receiveShadow=true (big props castShadow true).
+
+---------------------------------------------------------------------------------------------------
+# v4 — ITEM ACCURACY + LIVELINESS
+## Launchable hazards (track.js engine + js/tracks/cup_*.js)
+`track.launchHazard(ref, vx, vy, vz) -> bool` — `ref` is the hazard object from a course's hazards()
+(getHazards() entries carry `.ref`). A launched hazard stops colliding, flies ballistically with tumble
+spin (gravity ~30), shrinks/fades out when it lands or after ~2.5 s, then respawns at its normal
+behaviour after ~4 s (pop-in scale). Hazards may implement their own `launch(vx,vy,vz)` (needed when
+they're drawn via a shared InstancedMesh) — the engine calls it if present, else animates `object3D`.
+`hazard.launchable === false` opts out (e.g. giant stomping legs, crushers, geysers, fire bars).
+main.js calls launchHazard when a STAR kart (or a chomp-dragged kart) touches a hazard; items.js calls
+it when a mega shell / chomp / star-ish projectile hits one. Event: G.events.emit('hazardLaunched', {ref, x, z}).
+
+## Hit reactions (kart.js) — DD accurate
+- 'spin' (banana, green shell? no — see items): kart spins 1–2 times in place, keeps a little speed.
+- 'flip' (shells, star contact, bomb, chomp, fireball? no): kart is knocked UP into the air and
+  tumbles/rolls (barrel-roll + flip, ~1.3 s), lands with a bounce; riders flail; stars circle heads.
+- 'squish' (lightning shrink trample / crushers): flattened then pops back.

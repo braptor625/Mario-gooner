@@ -78,6 +78,29 @@
     flash.style.opacity = '0';
   }
 
+  // boost speed lines: a screen-edge streak overlay (single-view only), driven by the player's boost
+  const speedEl = document.createElement('div');
+  speedEl.style.cssText = 'position:fixed;inset:-10%;pointer-events:none;z-index:4;opacity:0;' +
+    'background:repeating-conic-gradient(from 0deg at 50% 52%, rgba(255,255,255,0) 0deg 2.1deg, rgba(255,255,255,0.55) 2.3deg 2.6deg, rgba(255,255,255,0) 2.8deg 7deg);' +
+    '-webkit-mask-image:radial-gradient(ellipse at 50% 52%, transparent 34%, #000 78%);mask-image:radial-gradient(ellipse at 50% 52%, transparent 34%, #000 78%);';
+  document.body.appendChild(speedEl);
+  let speedOp = 0, speedRot = 0;
+  const camList = [];
+  function updateSpeedLines(dt) {
+    const p = views.length === 1 ? views[0].kart : null;
+    let want = 0;
+    if (p && (Game.state === 'race' || Game.state === 'finished')) {
+      if (p.boostTimer > 0) want = 0.55 + 0.25 * Math.min(1, p.boostPower || 1);
+      if (p.starTimer > 0) want = 0.7;
+      if (p.cannonFlight) want = 0.9;
+    }
+    speedOp = G.damp(speedOp, want, want > speedOp ? 14 : 5, dt);
+    if (speedOp < 0.01 && want === 0) { if (speedEl.style.opacity !== '0') speedEl.style.opacity = '0'; return; }
+    speedRot = (speedRot + 47) % 360; // re-randomise the streak pattern each frame (flicker)
+    speedEl.style.opacity = (speedOp * (0.75 + Math.random() * 0.25)).toFixed(3);
+    speedEl.style.transform = 'rotate(' + speedRot + 'deg) scale(' + (1 + Math.random() * 0.04).toFixed(3) + ')';
+  }
+
   // FPS meter (?fps in URL or F3)
   const fpsEl = document.createElement('div');
   fpsEl.style.cssText =
@@ -261,6 +284,7 @@
 
   // ---------------------------------------------------------------- race setup
   function clearRace() {
+    amb('stop');
     if (Game.items) { if (Game.items.dispose) Game.items.dispose(); Game.items = null; }
     if (Game.battle && Game.battle.dispose) { Game.battle.dispose(); Game.battle = null; }
     if (Game.ghostPlayer) { Game.ghostPlayer.dispose && Game.ghostPlayer.dispose(); Game.ghostPlayer = null; }
@@ -483,6 +507,7 @@
   }
 
   function afterSetup(tdef) {
+    amb('start', scene, Game.track, Game);
     if (G.UI && G.UI.hideMenus) G.UI.hideMenus();
     forHuds((hud) => hud.show && hud.show());
     let label = tdef ? tdef.name : '';
@@ -615,6 +640,7 @@
           k.finishTime = Game.raceTime;
           if (v) onHumanFinish(k, v);
         } else if (v && lap > 1) {
+          amb('lap', k, lap, lap === laps);
           if (lap === laps) {
             v.hud && v.hud.banner && v.hud.banner('FINAL LAP!', 'final');
             snd('final_lap');
@@ -631,6 +657,7 @@
   }
 
   function onHumanFinish(k, v) {
+    amb('finish', k, k.position);
     v.hud && v.hud.banner && v.hud.banner(k.position === 1 ? 'WINNER!' : 'FINISH!', 'finish');
     snd('finish');
     voice(k.front, k.position <= 3 ? 'win' : 'lose');
@@ -684,6 +711,7 @@
   }
 
   // track hazards (traffic, crushers, boulders ...) vs karts
+  const amb = (fn, a, b) => { try { if (G.Ambience && G.Ambience[fn]) G.Ambience[fn](a, b); } catch (err) { console.warn('ambience', fn, err); } };
   function collideHazards() {
     const track = Game.track;
     if (!track || !track.getHazards) return;
@@ -697,6 +725,19 @@
         if (Math.abs(h.y - k.pos.y) > 4 + h.radius) continue;
         const dx = k.pos.x - h.x, dz = k.pos.z - h.z, r = h.radius + 1.1;
         if (dx * dx + dz * dz > r * r) continue;
+        // star power / chomp: plough straight through and send the obstacle flying (DD)
+        if ((k.starTimer > 0 || k.chompTimer > 0) && track.launchHazard && h.ref) {
+          const d = Math.sqrt(dx * dx + dz * dz) || 1;
+          const sp = Math.max(14, Math.abs(k.speed) * 0.9 + 8);
+          const fx = Math.sin(k.heading), fz = Math.cos(k.heading);
+          // mostly along the kart's travel direction, partly away from the contact point
+          const lx = fx * 0.7 - (dx / d) * 0.6, lz = fz * 0.7 - (dz / d) * 0.6, ll = Math.hypot(lx, lz) || 1;
+          if (track.launchHazard(h.ref, (lx / ll) * sp, 13 + Math.random() * 5, (lz / ll) * sp)) {
+            const v = viewOf(k);
+            if (v) { v.rig.shake = Math.max(v.rig.shake, 0.45); snd('explosion'); }
+          }
+          continue;
+        }
         if (h.hitKind === 'bump') {
           const d = Math.sqrt(dx * dx + dz * dz) || 1;
           if (k.bump) k.bump((dx / d) * 9 + (h.vx || 0), (dz / d) * 9 + (h.vz || 0));
@@ -749,6 +790,7 @@
       if (st === 'intro' && Game.stateTime >= INTRO_TIME) {
         setState('countdown');
         forHuds((hud) => hud.countdown && hud.countdown(3));
+        amb('countdown', 3);
         snd('countdown');
         Game.lastCount = 3;
       }
@@ -764,10 +806,12 @@
         if (n !== Game.lastCount && n >= 1) {
           Game.lastCount = n;
           forHuds((hud) => hud.countdown && hud.countdown(n));
+          amb('countdown', n);
           snd('countdown');
         }
         if (Game.stateTime >= COUNT_TIME) {
           forHuds((hud) => hud.countdown && hud.countdown(0));
+          amb('countdown', 0);
           snd('go');
           for (const k of Game.karts) {
             const h = Game.humans.find((x) => x.kart === k);
@@ -966,8 +1010,10 @@
     doFlash('#fff7a8', 0.75);
     for (const v of views) v.rig.shake = 0.6;
   });
+  G.events.on('hazardLaunched', (e) => amb('hazardLaunched', e));
   G.events.on('itemHit', (e) => {
     if (!e) return;
+    amb('itemHit', e);
     const vv = viewOf(e.victim);
     if (vv) { vv.rig.shake = 0.8; if (views.length === 1) doFlash('#ff3b3b', 0.25); voice(e.victim.rear, 'hit'); }
     const va = viewOf(e.attacker);
@@ -1058,6 +1104,12 @@
       console.error(err);
     }
     if (G.GFX && G.GFX.update) G.GFX.update(dt);
+    if (G.Ambience && G.Ambience.update && Game.track && Game.state !== 'ceremony') {
+      camList.length = 0;
+      if (views.length && Game.state !== 'attract') for (const v of views) camList.push(v.camera); else camList.push(camera);
+      try { G.Ambience.update(dt, Game.raceTime, camList); } catch (err) { console.warn('ambience', err); }
+    }
+    updateSpeedLines(dt);
     updateSun();
     const r0 = performance.now();
     renderer.info.reset();
