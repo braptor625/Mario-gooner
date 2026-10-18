@@ -850,7 +850,7 @@
       this._swapAnim -= dt;
       const p = clamp(1 - this._swapAnim / 0.35, 0, 1);
       const sw = Math.sin(p * Math.PI);
-      const arc = sw * 1.25;
+      const arc = sw * 0.8;
       const side = sw * 0.42;
       const fs = m.frontSeat.position, rs = m.rearSeat.position;
       // A: front -> rear
@@ -860,7 +860,7 @@
         fs.z + (rs.z - fs.z) * p + this._swALocal.z);
       this._swB.position.set(
         rs.x + (fs.x - rs.x) * p + this._swBLocal.x + side,
-        rs.y + (fs.y - rs.y) * p + arc * 1.3 + this._swBLocal.y,
+        rs.y + (fs.y - rs.y) * p + arc * 1.25 + this._swBLocal.y,
         rs.z + (fs.z - rs.z) * p + this._swBLocal.z);
       this._swA.rotation.y = p * TAU; this._swB.rotation.y = -p * TAU;
       // somersault-ish tuck + stretch while airborne, squash on touchdown
@@ -2002,11 +2002,11 @@
       for (let i = 0; i < n; i++) {
         const a = rnd() * TAU, rr = 0.4 + rnd() * 1.1;
         S.endColor(0.85, 0.97, 1);
-        S.spawn(2, 0, x + Math.cos(a) * rr, y + 0.2 + rnd() * 1.4, z + Math.sin(a) * rr, (rnd() - 0.5) * 0.8, 1.4 + rnd() * 1.8, (rnd() - 0.5) * 0.8, 0.9 + rnd() * 0.5, 0.08, 0.3 + rnd() * 0.25, 0.55, 0.85, 1, 0.8, -0.5, 0.6);
+        S.spawn(2, 0, x + Math.cos(a) * rr, y + 0.2 + rnd() * 1.4, z + Math.sin(a) * rr, (rnd() - 0.5) * 0.8, 1.4 + rnd() * 1.8, (rnd() - 0.5) * 0.8, 0.9 + rnd() * 0.5, 0.15, 0.55 + rnd() * 0.4, 0.45, 0.8, 1, 0.95, -0.5, 0.6);
       }
       for (let i = 0; i < n >> 1; i++) {
         A.endColor(0.5, 0.8, 1);
-        A.spawn(1, 0, x + (rnd() - 0.5) * 1.8, y + 0.3 + rnd() * 1.4, z + (rnd() - 0.5) * 1.8, 0, 1 + rnd(), 0, 0.6, 0.3, 0.06, 0.8, 0.95, 1, 0.9, 0, 0);
+        A.spawn(1, 0, x + (rnd() - 0.5) * 1.8, y + 0.3 + rnd() * 1.4, z + (rnd() - 0.5) * 1.8, 0, 1 + rnd(), 0, 0.7, 0.55, 0.08, 0.8, 0.95, 1, 0.95, 0, 0);
       }
     }
 
@@ -2095,8 +2095,8 @@
           const e = (fr >> 2) & 1 && this._exN > 1 ? 1 : 0;
           this._exWorld(e, FX_W);
           const rv = this._rev;
-          S.endColor(0.5, 0.5, 0.52);
-          S.spawn(3, 0, FX_W[0] - sn * 0.2, FX_W[1], FX_W[2] - cs * 0.2, -sn * (1 + rv * 2.5) + (rnd() - 0.5) * 0.5, 0.5 + rnd() * 0.4, -cs * (1 + rv * 2.5) + (rnd() - 0.5) * 0.5, 0.55, 0.15, 0.6 + rv * 0.5, 0.78 - rv * 0.3, 0.78 - rv * 0.3, 0.8 - rv * 0.3, 0.28 + rv * 0.3, -0.3, 1.2);
+          S.endColor(0.7, 0.7, 0.72);
+          S.spawn(3, 0, FX_W[0] - sn * 0.2, FX_W[1], FX_W[2] - cs * 0.2, -sn * (1 + rv * 2.5) + (rnd() - 0.5) * 0.5, 0.5 + rnd() * 0.4, -cs * (1 + rv * 2.5) + (rnd() - 0.5) * 0.5, 0.6, 0.18, 0.7 + rv * 0.6, 0.9 - rv * 0.1, 0.9 - rv * 0.1, 0.92 - rv * 0.1, 0.4 + rv * 0.25, -0.3, 1.2);
           if (rv > 0.5 && (fr & 4) === 0) { A.endColor(1, 0.2, 0.02); A.spawn(0, 0, FX_W[0] - sn * 0.3, FX_W[1], FX_W[2] - cs * 0.3, -sn, 0, -cs, 0.1, 0.3, 0.12, 1, 0.7, 0.2, 0.8, 0, 0); }
         }
       }
@@ -2120,8 +2120,8 @@
         if (off) {
           const side = (fr & 2) ? 0.78 : -0.78, bx = this._wx(0.9, side), bz = this._wz(0.9, side);
           if (sf === 'mud') S.endColor(0.2, 0.12, 0.05);
-          const c0 = sf === 'mud' ? 0.3 : sf === 'sand' ? 0.8 : 0.3, c1 = sf === 'mud' ? 0.19 : sf === 'sand' ? 0.68 : 0.4, c2 = sf === 'mud' ? 0.09 : sf === 'sand' ? 0.4 : 0.12;
-          S.spawn(0, 0, bx, py + 0.15, bz, (rnd() - 0.5) * 4 - sn * 2, 3.5 + rnd() * 3.5, (rnd() - 0.5) * 4 - cs * 2, 0.7, 0.2, 0.14, c0, c1, c2, 0.95, 26, 0.1);
+          const c0 = sf === 'mud' ? 0.3 : sf === 'sand' ? 0.8 : 0.4, c1 = sf === 'mud' ? 0.19 : sf === 'sand' ? 0.68 : 0.28, c2 = sf === 'mud' ? 0.09 : sf === 'sand' ? 0.4 : 0.1;
+          S.spawn(0, 0, bx, py + 0.15, bz, (rnd() - 0.5) * 4 - sn * 2, 3.5 + rnd() * 3.5, (rnd() - 0.5) * 4 - cs * 2, 0.7, 0.3, 0.2, c0, c1, c2, 0.95, 26, 0.1);
         } else if (sf === 'water') {
           for (let sd = -1; sd <= 1; sd += 2) {
             const bx = this._wx(-0.7, sd * 0.8), bz = this._wz(-0.7, sd * 0.8);
@@ -2131,7 +2131,7 @@
       }
 
       // ---- rescue drone: bubbles while hauled
-      if (this.rescued && (fr & 3) === 0) this._fxBubbles(2);
+      if (this.rescued && (fr & 1) === 0) this._fxBubbles(2);
     }
 
     dispose() {
