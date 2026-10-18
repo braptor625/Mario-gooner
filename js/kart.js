@@ -1522,6 +1522,9 @@
         this.lastGoodY = gy;
         this.lastGoodDist = ti.dist;
         if (surf === 'jump' && this._jumpCd <= 0) {
+          // DD ramps always carry you over their gap: guarantee a minimum launch speed
+          const minLaunch = this.stats.topSpeed * 0.85;
+          if (this.speed < minLaunch) this.speed = minLaunch;
           this.airborne = true;
           this.fromJump = true;
           this.vy = 8 + Math.abs(this.speed) * 0.12;

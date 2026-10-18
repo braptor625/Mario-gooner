@@ -833,7 +833,7 @@
         { d: rel(dAt(300, 1)), len: 10, l: 0, w: 9 }, { d: rel(dAt(300, -1)) - 5, len: 10, l: 0, w: 9 },
         { d: rel(dAt(560, -1)), len: 10, l: 0, w: 9 },
       ],
-      jumps: [{ d: dJumpA, len: 10, l: 0, w: 13 }, { d: dJumpB, len: 10, l: 0, w: 13 }],
+      jumps: [{ d: dJumpA, len: 10, l: 0, w: 2 * SERP_HW + 2 }, { d: dJumpB, len: 10, l: 0, w: 13 }],
       zones: [
         { d: dJumpA + 11, len: 9, l: 0, w: 2 * (SERP_HW + SERP_SH), surface: 'void', offroad: true, color: 0x14688c },
         { d: dFall - 11, len: 22, l: 0, w: 2 * (SERP_HW + SERP_SH), surface: 'water', offroad: true, color: 0x62d0f2 },

@@ -195,7 +195,7 @@
     pads.push({ d: GAP2 - 18, len: 11, l: 0, w: 10 }); padAt(800, true); padAt(870); padAt(925, true);
     G.defineTrack({
       id: 'grand_colosseum', name: 'Grand Colosseum', cup: 'special', order: 1, laps: 2, music: 'colosseum', seed: 1017,
-      hw: 12, shoulder: 3, scale: 1, style: 'meadow', noWalls: true, ground: false, startArch: true, offroad: 'offroad',
+      hw: 12, shoulder: 3, scale: 1, style: 'meadow', noWalls: true, rails: true, ground: false, startArch: true, offroad: 'offroad',
       theme: {
         sky: [0x3c82d8, 0xf1d9a8, 0xe7c488], fog: [0xe8d3a4, 230, 820], ground: 0xd8bd84, shoulder: 0xb99b62,
         road: [0x7b7064, 0x70655a], curb: [0xb7432e, 0xf0e2c0], hemi: [0xfff0d0, 0x9a7a4a, 1.0], sun: [0xfff0d0, 0.9], emb: 0xc9a46a, bg: 0xe8d3a4,
@@ -943,7 +943,7 @@
 
   G.defineTrack({
     id: 'rainbow_ribbon', name: 'Rainbow Ribbon', cup: 'special', order: 4, laps: 3, music: 'rainbow', seed: 4041,
-    hw: 12, shoulder: 3, scale: 1, style: 'starlight', noWalls: true, startArch: true,
+    hw: 12, shoulder: 3, scale: 1, style: 'starlight', noWalls: true, rails: true, startArch: true,
     theme: {
       sky: [0x03010f, 0x140a3c, 0x070320], fog: [0x0a0630, 190, 720], ground: 0x000000, shoulder: 0x000000,
       road: [0x7050c0, 0x6040b0], curb: [0xffffff, 0x78f0ff], hemi: [0xc7b8ff, 0x3a2a7a, 1.1], sun: [0xffe6ff, 0.6], emb: 0x000000, bg: 0x0a0630,

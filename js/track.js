@@ -375,6 +375,8 @@
       const baseTheme = THEMES[typeof base.theme === 'string' ? base.theme : base.style] || THEMES.meadow;
       this.cfg = typeof base.theme === 'object' ? Object.assign({}, baseTheme, base.theme) : baseTheme;
       this.noWalls = !!base.noWalls;
+      // rails: wall-less course look, but a low guard rail keeps karts on (gaps only at explicit void zones)
+      this.rails = !!base.rails && this.noWalls;
       this.shoulder = base.shoulder;
       this.offroadSurface = base.offroad || 'offroad';
       this.rng = mulberry(base.seed + (rev ? 1000 : 0));
@@ -550,7 +552,7 @@
       let surface = this.offroadSurface;
       r.cannonTo = 0; r.cannonHeight = 0;
       if (a <= hw) surface = 'road';
-      else if (this.noWalls && a > hw + 1) surface = 'void';
+      else if (this.noWalls && !this.rails && a > hw + 1) surface = 'void';
       if (surface !== 'void') {
         for (let k = 0; k < this.nrect; k++) {
           const q = this.rects[k];
@@ -1064,8 +1066,28 @@
           road.quadUV(this._P(i, -hi, -0.9), this._P(i, hi, -0.9), this._P(j, hj, -0.9), this._P(j, -hj, -0.9), bk, z8);
         }
       }
+      // continuous guard rails (def.rails) except across void-zone gaps
+      if (this.rails) {
+        const inGap = (d) => {
+          for (let k = 0; k < this.nrect; k++) { const q = this.rects[k]; if (q.kind === 'void' && d >= q.d0 - 2 && d <= q.d1 + 2) return true; }
+          return false;
+        };
+        const rc0 = def.railColors ? col(def.railColors[0]) : star ? col(0x66f2ff) : col(0xd8d2c4);
+        const rc1 = def.railColors ? col(def.railColors[1] || def.railColors[0]) : star ? col(0xff6ad5) : col(0xb8b0a0);
+        for (let i = 0; i < N; i += 2) {
+          const j = i + 2 >= N ? 0 : i + 2;
+          if (inGap(i * ds)) continue;
+          const cc = ((i >> 2) & 1) ? rc0 : rc1;
+          for (let s = -1; s <= 1; s += 2) {
+            const a0 = s * (hwA[i] + 0.6), a1 = s * (hwA[i] + 1.05), b0 = s * (hwA[j] + 0.6), b1 = s * (hwA[j] + 1.05);
+            road.quad(this._P(i, a0, 0.05), this._P(i, a0, 0.9), this._P(j, b0, 0.9), this._P(j, b0, 0.05), cc);
+            road.quad(this._P(i, a0, 0.9), this._P(i, a1, 0.9), this._P(j, b1, 0.9), this._P(j, b0, 0.9), cc);
+            road.quad(this._P(i, a1, 0.9), this._P(i, a1, 0.05), this._P(j, b1, 0.05), this._P(j, b1, 0.9), cc);
+          }
+        }
+      }
       // glowing guard rails on the outside of sharper corners (starlight only)
-      if (star) {
+      if (star && !this.rails) {
         for (let i = 0; i < N; i += 2) {
           const j = i + 2 >= N ? 0 : i + 2;
           if (Math.abs(this.curv[i]) < 0.011) continue;
