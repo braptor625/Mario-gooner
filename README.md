@@ -14,7 +14,7 @@ npx http-server .   # or: python3 -m http.server
 | Action | Keyboard (1P) | Xbox controller (wired or wireless) |
 |---|---|---|
 | Accelerate | ↑ / W / X | A or RT |
-| Brake / reverse | ↓ / S | B or LT |
+| Brake / reverse (↓ / S only brake when you are NOT holding gas — with gas held they aim item throws backwards) | ↓ / S | B or LT |
 | Steer | ← → / A D | Left stick or D-pad |
 | Hop / drift (hold through the turn until the sparks turn blue, then release for a mini-turbo; wiggling the steering charges faster) | Shift / Space | RB |
 | Use the rear rider's item (hold to drag it behind you; hold down to throw it backwards) | E / L / Ctrl | X or LB |

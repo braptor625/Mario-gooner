@@ -264,7 +264,11 @@
     const act = p.act;
     s.steer = G.clamp(steer, -1, 1);
     s.accel = act.accel.down ? 1 : 0;
-    s.brake = act.brake.down ? 1 : 0;
+    // S / Down double as "throw backwards": while the gas is held they only aim the throw and never
+    // brake. Controller brake (B / LT) always brakes since throw-back is on the stick there.
+    const padBrake = pad ? readPadAction(pad, 'brake') : false;
+    const kbBrake = map ? anyHeld(map.brake) : false;
+    s.brake = padBrake || (kbBrake && !act.accel.down) ? 1 : 0;
     s.drift = act.drift.down;
     s.item = act.item.down;
     s.itemPressed = act.item.pressed;
