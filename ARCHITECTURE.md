@@ -421,3 +421,23 @@ it when a mega shell / chomp / star-ish projectile hits one. Event: G.events.emi
 - 'flip' (shells, star contact, bomb, chomp, fireball? no): kart is knocked UP into the air and
   tumbles/rolls (barrel-roll + flip, ~1.3 s), lands with a bounce; riders flail; stars circle heads.
 - 'squish' (lightning shrink trample / crushers): flattened then pops back.
+
+---------------------------------------------------------------------------------------------------
+# v5 — COURSE LIVELINESS (track.js engine + js/tracks/cup_*.js + ambience.js)
+Engine (automatic): foliage/tufts sway via G.GFX.patchWind (legacy scenery trees, grass tufts, any `kit.foliage`/`kit.mesh(b,{wind:true})`);
+boost pads scroll chevrons; water zones + lakes use G.GFX.water; item-box rows twinkle; arch pennants wave; sky clouds drift;
+`rainbow` (starlight style) road hue-rotates. Spectators react to G.events 'itemHit' / 'hazardLaunched', human karts passing, human lap changes.
+Kit helpers (all zero per-frame allocation, one draw per batch; build space coordinates):
+```
+kit.crowd(spots:[[x,y,z,ry?,u?]], {scale, colors:[hex], skin:[hex], radius, period, woff, waveTime, wave:bool}) -> crowd   // 2 InstancedMesh draws; bounces, stadium wave along u, cheers near humans
+kit.crowdStand({d0,d1,side:+1|-1,l0,rows,gap,rise,step,dy, ...crowd opts})    // spectators standing along the road
+kit.flag(x,y,z,w,h,ry,[hexA,hexB],{pole,pattern:'stripes'|'check'|'vstripes'|'solid',amp})   kit.flagAt(d,l,w,h,colors,{pole,dy,flip})
+kit.banner(x,yBottom,z,w,h,ry,colors,{pattern,ground,amp})   kit.bunting(pA,pB,colors,n,size,sag)    // cloth merged into ONE mesh, vertex-shader waving
+kit.spinner(obj3D,'x'|'y'|'z',speed)  kit.spinBatch(batch,{x,y,z,ry,axis,speed})   kit.sway(obj,axis,amp,speed,phase)  kit.bob(obj,amp,speed,phase,roll)  kit.slide(obj,dx,dy,dz,speed)
+kit.blinker(material,period,{duty,phase,lo,hi,mode:'square'|'sine',alt:hex})     // neon / marquee / traffic lights
+kit.particles({emitters|x,y,z,count,vel,spread,jitter,sphere,burst,life,size,grow,grav,wob,alpha,pow,fadeIn,win,color:hex|[hex],tex:'soft'|'spark',additive})  // smoke, steam, flames, fireworks, spray (GPU animated)
+kit.birds({cx,cz,y,radius,count,speed,size,body,wing})   kit.lightBeam({x,y,z,len,width,speed,count,tilt,color})  // lighthouse / searchlights
+kit.waterMat({color,deep,opacity,waveScale})  kit.flowMat('water'|'lava'|'river',{speed:[du,dv],repeat:[u,v],opacity})  kit.panel(corners4,mat,rep)  kit.ribbon(d0,d1,l0,l1,dy,mat,{tile})
+kit.foliage(batch,{strength,heightScale,groundY})   kit.scroll(texture,du,dv)
+```
+Ambience: ambient sprite sizes x2-3, 'leadChange' burst when a human kart's position becomes 1 (Ambience.leadChange(kart)).

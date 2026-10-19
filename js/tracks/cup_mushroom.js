@@ -455,6 +455,7 @@
       kit.grassTufts(260, 0.4, 22, { flowers: 0.3, colors: [0x6fc44a, 0x8ad45a, 0x5ab04a], scale: [0.9, 1.6] });
       kit.birds({ cx: bb.cx, cz: bb.minZ - 70, y: 30, radius: 120, count: 8, speed: 0.12, size: 1.2 });
       kit.birds({ cx: bb.cx + 90, cz: bb.minZ - 20, y: 40, radius: 70, count: 5, speed: -0.15 });
+      for (let sd = -1; sd <= 1; sd += 2) kit.crowdStand({ d0: L - 45, d1: L + 70, side: sd, l0: 12 + 5 + 3.2, rows: 2, gap: 1.3, rise: 0, step: 2.3, scale: 1.1, radius: 55, colors: [0xff7a59, 0x35c0d9, 0xffd23a, 0xffffff, 0xff7ad9, 0x59d66b] });
       // pennants on the hotel roof + beach banners at the start straight
       { const hp = kit.at(310, 56, 0); kit.flag(hp[0], gy + 17.2, hp[2], 4, 2.2, 0.4, [0xff7a59, 0xfff3d6], { pole: 5 }); }
       for (let d = 15; d < 120; d += 35) for (let sd = -1; sd <= 1; sd += 2) { const p = kit.at(d, sd * 18.5, 0), f = kit.frame(d); kit.flag(p[0], p[1], p[2], 2.6, 1.5, Math.atan2(f.tx, f.tz) - Math.PI / 2, [[0xff7a59, 0xfff3d6], [0x35c0d9, 0xffffff]][((d / 35) | 0) & 1], { pole: 6.5 }); }

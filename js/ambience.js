@@ -530,7 +530,12 @@
     if (!S || !isHuman(kart) || !kart.pos) return;
     try {
       const p = kart.pos, y = (kart.y !== undefined ? kart.y : p.y) + 1.4, B = S.pools.B;
-      burstConfetti(p.x, y, p.z, 30, 9, 5);
+      const D = S.pools.D;
+      for (let i = 0; i < 36; i++) {   // big, readable confetti fountain
+        const a = rnd() * TAU, sp = R(0.3, 1) * 6;
+        const k = D.emit(p.x, y, p.z, Math.cos(a) * sp, R(7, 12), Math.sin(a) * sp, R(2.4, 3.6), CONF[(rnd() * CONF.length) | 0], 1, R(0.34, 0.55), R(0.34, 0.55));
+        D.grav[k] = -9; D.drag[k] = 1.1; D.flut[k] = R(1, 2.4); D.shape[k] = 1; D.spin[k] = R(6, 14);
+      }
       for (let i = 0; i < 22; i++) {   // gold sparkle ring
         const a = (i / 22) * TAU + rnd() * 0.2, sp = R(5, 8);
         const k = B.emit(p.x, y, p.z, Math.cos(a) * sp, R(2, 5), Math.sin(a) * sp, R(0.7, 1.1), [0xffe46b, 0xffffff, 0xffc030][i % 3], 1, R(0.5, 0.8), R(0.5, 0.8));

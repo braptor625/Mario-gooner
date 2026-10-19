@@ -2007,7 +2007,7 @@
     _buildSparkles() {
       const sp = this.itemBoxSpots; if (!sp || !sp.length) return;
       const em = []; for (const s of sp) em.push([s.x, s.y + 1.1, s.z]);
-      this._particles({ emitters: em, count: 5, vel: [0, 0.7, 0], spread: [0.6, 0.35, 0.6], jitter: [0.9, 0.5, 0.9], life: 1.9, size: 0.62, grow: -0.4, alpha: 0.95, pow: 0.7, fadeIn: 0.25,
+      this._particles({ emitters: em, count: 6, vel: [0, 0.8, 0], spread: [0.6, 0.35, 0.6], jitter: [1.0, 0.7, 1.0], life: 1.7, size: 1.0, grow: -0.4, alpha: 1, pow: 0.6, fadeIn: 0.2,
         color: [0xfff4b0, 0xffffff, 0xa8e8ff, 0xffd0f4], tex: 'spark', additive: true });
     }
 
