@@ -620,16 +620,20 @@
       this.fakeMat.uniforms.uTime.value = t;
       let halos = 0;
       for (let i = 0; i < this.nBoxes; i++) {
-        const s = this.bS[i], a = t * 1.6 + i * 0.7, c = Math.cos(a) * s, sn = Math.sin(a) * s, o = i * 16;
+        const s = this.bS[i], a = t * 1.6 + i * 0.7, o = i * 16;
+        // respawn pop-in: ease-out-back on Y with a matching squeeze on X/Z (jelly overshoot)
+        let sy = s, sxz = s;
+        if (s > 0 && s < 1 && this.bAct[i]) { const x = s - 1; sy = Math.max(0, 1 + 2.7 * x * x * x + 1.7 * x * x); sxz = Math.max(0, s * (1.04 - (sy - s) * 0.45)); }
+        const c = Math.cos(a) * sxz, sn = Math.sin(a) * sxz;
         const bob = this.by[i] + 1.15 + Math.sin(t * 2.2 + (this.bDbl[i] ? 0 : i)) * 0.15;
         te[o] = c; te[o + 1] = 0; te[o + 2] = -sn; te[o + 3] = 0;
-        te[o + 4] = 0; te[o + 5] = s; te[o + 6] = 0; te[o + 7] = 0;
+        te[o + 4] = 0; te[o + 5] = sy; te[o + 6] = 0; te[o + 7] = 0;
         te[o + 8] = sn; te[o + 9] = 0; te[o + 10] = c; te[o + 11] = 0;
         te[o + 12] = this.bx[i]; te[o + 13] = bob; te[o + 14] = this.bz[i]; te[o + 15] = 1;
         // inner "?" spins the other way, tilts and bobs a little inside the cube
-        const b = -t * 2.6 + i * 1.3, qc = Math.cos(b) * s, qs = Math.sin(b) * s;
+        const b = -t * 2.6 + i * 1.3, qc = Math.cos(b) * sxz, qs = Math.sin(b) * sxz;
         qe[o] = qc; qe[o + 1] = 0; qe[o + 2] = -qs; qe[o + 3] = 0;
-        qe[o + 4] = 0; qe[o + 5] = s; qe[o + 6] = 0; qe[o + 7] = 0;
+        qe[o + 4] = 0; qe[o + 5] = sy; qe[o + 6] = 0; qe[o + 7] = 0;
         qe[o + 8] = qs; qe[o + 9] = 0; qe[o + 10] = qc; qe[o + 11] = 0;
         qe[o + 12] = this.bx[i]; qe[o + 13] = bob + Math.sin(t * 3.1 + i) * 0.04; qe[o + 14] = this.bz[i]; qe[o + 15] = 1;
         if (A && s > 0.05 && halos < 180) {
@@ -657,7 +661,7 @@
             x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, life: 10, radius: ETYPE[type].r, bounces: 0,
             maxBounce: 5, target: null, hint: -1, dist: 0, speed: 0, hover: 0.1, spin: 0, spinRate: 0,
             heldId: null, directR: 25, lastPick: 0, hitT: new Float32Array(Math.max(1, this.karts.length)),
-            spark: null, hitKind: 'flip',
+            spark: null, hitKind: 'flip', gT: 0,
           };
           e.spark = e.mesh.userData.spark || null;
           arr.push(e); this.ents.push(e);
@@ -670,6 +674,20 @@
     _buildExplosions() { /* explosions are particle bursts on the shared FX hub */ }
 
     // ------------------------------------------------------------ visual effects (pooled, hub-based)
+    // respawn pop: expanding ring + a few twinkles
+    _fxBoxPop(i) {
+      const A = this.hub && this.hub.add;
+      if (!A) return;
+      const x = this.bx[i], y = this.by[i] + 1.15, z = this.bz[i], rnd = Math.random;
+      A.endColor(0.5, 0.8, 1);
+      A.spawn(2, 2, x, y - 1.0, z, 0, 0, 0, 0.4, 0.6, 3.4, 0.9, 0.95, 1, 0.6, 0, 0);
+      for (let j = 0; j < 4; j++) {
+        const a = rnd() * 6.283;
+        A.endColor(1, 1, 0.6);
+        A.spawn(1, 0, x + Math.cos(a) * 0.5, y, z + Math.sin(a) * 0.5, Math.cos(a) * 2.5, 1 + rnd() * 2, Math.sin(a) * 2.5, 0.45, 0.6, 0.05, 1, 1, 0.8, 1, 2, 1.5);
+      }
+    }
+
     _fxBoxBreak(i) {
       const hub = this.hub;
       if (!hub) return;
@@ -728,6 +746,20 @@
         const a = rnd() * 6.283, sp = r * (0.3 + rnd() * 0.8);
         S.endColor(0.5, 0.47, 0.45);
         S.spawn(3, 0, x + Math.cos(a) * r * 0.2, cy, z + Math.sin(a) * r * 0.2, Math.cos(a) * sp, 2 + rnd() * 4, Math.sin(a) * sp, 1.1 + rnd() * 0.7, r * 0.4, r * 1.4, 0.16, 0.14, 0.13, 0.6, -0.6, 1.4);
+      }
+    }
+
+    // wall bounce: white clink flash, spark fan back into the course and a tiny shock ring
+    _fxClink(e, q) {
+      const A = this.hub && this.hub.add;
+      if (!A) return;
+      const rnd = Math.random, x = e.x, y = e.y + 0.45, z = e.z, sgn = q.lateral > 0 ? 1 : -1;
+      A.spawn(1, 0, x, y, z, 0, 0, 0, 0.16, 1.6, 0.4, 1, 1, 0.9, 1, 0, 0);
+      A.spawn(0, 0, x, y, z, 0, 0, 0, 0.12, 1.8, 0.5, 1, 0.95, 0.7, 0.8, 0, 0);
+      for (let j = 0; j < 7; j++) {
+        const sp = 4 + rnd() * 7, tg = (rnd() - 0.5) * 8;
+        A.endColor(1, 0.5, 0.1);
+        A.spawn(0, 1, x, y, z, -q.rx * sgn * sp + q.tx * tg, 1.5 + rnd() * 3, -q.rz * sgn * sp + q.tz * tg, 0.28 + rnd() * 0.2, 0.1, 0.03, 1, 0.95, 0.6, 1, 16, 0.4);
       }
     }
 
@@ -835,6 +867,18 @@
         }
         case 'shell_red':
           if (held) { A.put(0, 0, x, y + 0.5, z, 1.5, 1, 0.2, 0.1, 0.18, 0, 0, 0, 0); break; }
+          // homing reticle: a ring + four corner ticks closing in on whoever it is chasing
+          if (e.mode === 'home' && e.target && e.target.pos && !e.target.finished) {
+            const T = e.target, dx = T.pos.x - x, dz = T.pos.z - z, d = Math.sqrt(dx * dx + dz * dz);
+            if (d < 60) {
+              const ty = this._kartY(T) + 0.12, close = 1 - Math.min(1, d / 60), pul = 1 + 0.12 * Math.sin(t * 14), rr = (3.4 - close * 0.9) * pul;
+              A.put(2, 2, T.pos.x, ty, T.pos.z, rr, 1, 0.15, 0.1, 0.5 + 0.3 * close, 0, 0, 0, t * 2.5);
+              for (let c = 0; c < 4; c++) {
+                const a = t * 3 + c * 1.5708;
+                A.put(0, 2, T.pos.x + Math.cos(a) * rr * 0.5, ty, T.pos.z + Math.sin(a) * rr * 0.5, 0.5, 1, 0.5, 0.3, 0.9, 0, 0, 0, 0);
+              }
+            }
+          }
           A.put(0, 0, x, y + 0.5, z, 2.3, 1, 0.2, 0.1, 0.4, 0, 0, 0, 0);
           A.endColor(1, 0.1, 0.05);
           A.spawn(0, 0, x + (rnd() - 0.5) * 0.3, y + 0.45, z + (rnd() - 0.5) * 0.3, (rnd() - 0.5), 0.2, (rnd() - 0.5), 0.5, 1.1, 0.15, 1, 0.45, 0.3, 0.85, 0, 1.5);
@@ -845,11 +889,27 @@
           A.put(0, 0, x, y + 0.5, z, 1.7, 0.4, 1, 0.5, 0.2, 0, 0, 0, 0);
           if ((tick & 1) === 0) { A.endColor(0.2, 0.9, 0.3); A.spawn(0, 0, x, y + 0.4, z, (rnd() - 0.5), 0.2, (rnd() - 0.5), 0.3, 0.5, 0.1, 0.7, 1, 0.8, 0.5, 0, 1); }
           break;
-        case 'spiny':
+        case 'spiny': {
           A.put(0, 0, x, y + 0.7, z, 2.8, 0.2, 0.45, 1, 0.4, 0, 0, 0, 0);
+          // warning siren: red / blue beacons circle the shell
+          for (let c = 0; c < 2; c++) {
+            const a = t * 11 + c * 3.1416, red = c === 0;
+            A.put(0, 0, x + Math.cos(a) * 1.0, y + 1.25, z + Math.sin(a) * 1.0, 1.25, red ? 1 : 0.25, red ? 0.15 : 0.4, red ? 0.1 : 1, 0.8, 0, 0, 0, 0);
+            A.put(0, 0, x + Math.cos(a) * 1.0, y + 1.25, z + Math.sin(a) * 1.0, 0.45, 1, 1, 1, 0.9, 0, 0, 0, 0);
+          }
+          // a shadow swells over the leader as it falls
+          if (e.target && e.target.pos && !e.target.finished) {
+            const T = e.target, dx = T.pos.x - x, dz = T.pos.z - z, d = Math.sqrt(dx * dx + dz * dz);
+            if (d < 70) {
+              const g = 1 - Math.min(1, d / 70), sz = 2.2 + g * g * 6;
+              S.put(0, 2, T.pos.x, this._kartY(T) + 0.1, T.pos.z, sz, 0, 0, 0, 0.18 + 0.4 * g, 0, 0, 0, 0);
+              A.put(2, 2, T.pos.x, this._kartY(T) + 0.14, T.pos.z, sz * 0.9 * (1 + 0.1 * Math.sin(t * 16)), 1, 0.2, 0.15, 0.25 + 0.4 * g, 0, 0, 0, t);
+            }
+          }
           A.endColor(0.1, 0.3, 1);
           A.spawn(0, 0, x + (rnd() - 0.5) * 0.4, y + 0.6, z + (rnd() - 0.5) * 0.4, (rnd() - 0.5), 0.3, (rnd() - 0.5), 0.45, 0.8, 0.12, 0.5, 0.75, 1, 0.8, 0, 1.5);
           break;
+        }
         case 'mega_shell':
           A.put(0, 0, x, y + 1.2, z, 6.5, 1, 0.85, 0.3, 0.3, 0, 0, 0, 0);
           if ((tick & 1) === 0) {
@@ -991,7 +1051,8 @@
         }
         const spin = Math.abs(Math.cos(t * 3 + i));
         const blink = d.age > DROP_LIFE - 3 && ((t * 8) | 0) % 2 === 0;
-        const sc = blink ? 0.001 : 2.4;
+        const pu = Math.min(1, d.age * 4), px = pu - 1, pop = 1 + 2.7 * px * px * px + 1.7 * px * px;   // bounce-in
+        const sc = blink ? 0.001 : 2.4 * pop;
         d.spr.scale.set(Math.max(0.35, spin) * sc, sc, 1);
         d.spr.position.set(d.x, d.y + 0.7 + (d.vy === 0 ? Math.sin(t * 3 + i) * 0.2 : 0), d.z);
       }
@@ -1419,7 +1480,7 @@
           if (this.bS[i] > 0) this.bS[i] = Math.max(0, this.bS[i] - dt * 8);
           if (this.bR[i] > 0) {
             this.bR[i] -= dt;
-            if (this.bR[i] <= 0) { this.bAct[i] = 1; this.bS[i] = 0.001; }
+            if (this.bR[i] <= 0) { this.bAct[i] = 1; this.bS[i] = 0.001; this._fxBoxPop(i); }
           }
         }
       }
@@ -1573,6 +1634,15 @@
     }
 
     _tickTimers(k, st, dt) {
+      if (st.goldT > 0 && this.hub) {
+        const A = this.hub.add, p = 0.8 + 0.2 * Math.sin(this.t * 12);
+        A.put(0, 0, k.pos.x, k.pos.y + 0.9, k.pos.z, 4.2 * p, 1, 0.8, 0.2, 0.35, 0, 0, 0, 0);
+        if (Math.random() < 0.35) {
+          const a = Math.random() * 6.283;
+          A.endColor(1, 0.9, 0.4);
+          A.spawn(1, 0, k.pos.x + Math.cos(a) * 1.2, k.pos.y + 0.4 + Math.random() * 1.2, k.pos.z + Math.sin(a) * 1.2, 0, 1.2, 0, 0.5, 0.55, 0.05, 1, 0.85, 0.3, 1, 0, 0);
+        }
+      }
       if (st.goldT > 0) {
         st.goldT -= dt;
         if (st.goldCd > 0) st.goldCd -= dt;
@@ -1833,9 +1903,24 @@
         const m = e.mesh;
         m.position.set(e.x, e.y, e.z);
         const kind = e.kind;
+        if (e.state === 'ground') e.gT += dt; else e.gT = 0;
         if (kind === 'fake_box') { m.rotation.y = e.spin; m.userData.cube.position.y = 0.9 + Math.sin(this.t * 3 + i) * 0.1; }
-        else if (kind === 'banana' || kind === 'giant_banana') m.rotation.y = (e.state === 'air' ? e.spin * 4 : e.heldId ? 0 : 0.6 + i);
-        else if (kind === 'bomb') { /* flashing + fuse spark handled in _fxEnt */ }
+        else if (kind === 'banana' || kind === 'giant_banana') {
+          m.rotation.y = (e.state === 'air' ? e.spin * 4 : e.heldId ? 0 : 0.6 + i);
+          // placed: squash on impact, then a decaying wobble (like a dropped peel rocking to rest)
+          if (e.state === 'ground' && e.gT < 1.6) {
+            const g = e.gT, d = Math.exp(-g * 3.2), w = Math.sin(g * 20) * d;
+            m.rotation.z = w * 0.42; m.rotation.x = Math.cos(g * 17) * d * 0.22;
+            const q = Math.exp(-g * 9);
+            m.scale.set(1 + 0.22 * q, 1 - 0.3 * q, 1 + 0.22 * q);
+          } else if (m.rotation.z !== 0 || m.scale.y !== 1) { m.rotation.z = 0; m.rotation.x = 0; m.scale.set(1, 1, 1); }
+        }
+        else if (kind === 'bomb') {
+          // swells and throbs faster as the fuse runs out (flashing + fuse spark are in _fxEnt)
+          let sc = 1;
+          if (e.state === 'ground' && e.age > e.life - 1.6) { const p = (e.age - (e.life - 1.6)) / 1.6; sc = 1 + (0.04 + 0.2 * p) * (0.5 + 0.5 * Math.sin(e.age * (14 + 40 * p))) + 0.1 * p; }
+          m.scale.setScalar(sc);
+        }
         else if (kind === 'fireball') { /* sprites only */ }
         else m.rotation.y = e.spin;
         if (this.hub) this._fxEnt(e, i, dt);
@@ -1932,6 +2017,7 @@
           else {
             e.vx -= 2 * vn * q.rx; e.vz -= 2 * vn * q.rz;
             e.bounces++;
+            this._fxClink(e, q);
             this._sndNear('wall', e.x, e.z, 25);
             if (e.bounces > e.maxBounce) { this._free(e); return; }
           }

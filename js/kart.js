@@ -490,7 +490,7 @@
           if (Math.abs(pos.getX(i)) < 0.06 && Math.abs(pos.getY(i) - my) < 0.05 && pos.getZ(i) > mz) mz = pos.getZ(i);
         }
         if (mz < 0) mz = pz - 0.03;
-        f = { ex, ey, ez: pz - 0.008 - 0.485 * R, R, my, mz: mz - 0.012 };
+        f = { ex, ey, ez: pz - 0.008 - 0.485 * R, R, my, mz: Math.min(mz, pz + 0.01) - 0.012 };
       }
     }
     faceCache.set(geo, f);
@@ -499,6 +499,12 @@
   function addFace(rider) {
     if (!rider || rider.userData.face) return;
     const head = rider.userData.head;
+    {
+      const nm = (rider.name || '').replace('rider_', '');
+      let hh = 0;
+      for (let i = 0; i < nm.length; i++) hh = (hh * 31 + nm.charCodeAt(i)) | 0;
+      rider.userData.flair = Math.abs(hh) % 4;   // per-character victory flourish
+    }
     if (!head || !head.geometry) return;
     const f = findFace(head.geometry);
     if (!f) return;
@@ -517,10 +523,7 @@
     mouth.position.set(0, f.my, f.mz);
     mouth.visible = false;
     head.add(lids, mouth);
-    let h = 0;
-    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
     rider.userData.face = { lids, mouth, f, H: f.R * 1.28, blink: 1 + Math.random() * 3.5, bt: 0, lk: 0, mk: 0 };
-    rider.userData.flair = Math.abs(h) % 4;
   }
   const lidGeos = {};
   function mergeLids(f) {
@@ -2109,7 +2112,19 @@
     _onLand(iv) {
       this._sqV -= Math.min(9, iv * 0.55);
       this._susV -= Math.min(2, iv * 0.12);
-      if (this._fx) this._fxLand(iv);
+      if (this._fx) { this._fxLand(iv); if (iv > 13) this._fxScrape(iv); }
+    }
+
+    // hard landing: the undercarriage grinds, throwing a fan of sparks out from the sides and back
+    _fxScrape(iv) {
+      const A = this._fx.add, rnd = Math.random, py = this.pos.y + 0.15, n = 8 + Math.min(10, (iv - 13) | 0);
+      const sn = Math.sin(this.heading), cs = Math.cos(this.heading);
+      A.put(0, 0, this.pos.x, py, this.pos.z, 2.4, 1, 0.7, 0.25, 0.55, 0, 0, 0, 0);
+      for (let j = 0; j < n; j++) {
+        const side = (j & 1) ? 1 : -1, sp = 4 + rnd() * 7, bx = this._wx(rnd() * 1.6 - 0.8, side * 0.7), bz = this._wz(rnd() * 1.6 - 0.8, side * 0.7);
+        A.endColor(1, 0.3, 0.04);
+        A.spawn(0, 1, bx, py, bz, cs * side * sp - sn * sp * 0.3, 1.5 + rnd() * 3.5, -sn * side * sp - cs * sp * 0.3, 0.3 + rnd() * 0.25, 0.1, 0.03, 1, 0.85, 0.45, 1, 16, 0.4);
+      }
     }
 
     // dust colour per surface into RGB
@@ -2279,6 +2294,7 @@
           const rv = this._rev;
           S.endColor(0.7, 0.7, 0.72);
           S.spawn(3, 0, FX_W[0] - sn * 0.2, FX_W[1], FX_W[2] - cs * 0.2, -sn * (1 + rv * 2.5) + (rnd() - 0.5) * 0.5, 0.5 + rnd() * 0.4, -cs * (1 + rv * 2.5) + (rnd() - 0.5) * 0.5, 0.6, 0.18, 0.7 + rv * 0.6, 0.9 - rv * 0.1, 0.9 - rv * 0.1, 0.92 - rv * 0.1, 0.4 + rv * 0.25, -0.3, 1.2);
+          if (rv <= 0.5 && rnd() < 0.35) { A.endColor(1, 0.3, 0.05); A.spawn(0, 0, FX_W[0] - sn * 0.25, FX_W[1], FX_W[2] - cs * 0.25, -sn * 0.8, 0, -cs * 0.8, 0.1, 0.22, 0.05, 1, 0.65, 0.2, 0.7, 0, 0); }
           if (rv > 0.5 && (fr & 4) === 0) { A.endColor(1, 0.2, 0.02); A.spawn(0, 0, FX_W[0] - sn * 0.3, FX_W[1], FX_W[2] - cs * 0.3, -sn, 0, -cs, 0.1, 0.3, 0.12, 1, 0.7, 0.2, 0.8, 0, 0); }
         }
       }
@@ -2294,6 +2310,38 @@
           S.endColor(0.3, 0.3, 0.3);
           S.spawn(3, 0, bx, FX_W[1], bz, -sn * 3, 0.5, -cs * 3, 0.4, 0.2, 0.8, 0.35, 0.33, 0.32, 0.4, -0.2, 2);
         }
+      }
+
+      // ---- hard braking: rear-tyre smoke puffs
+      if (!air && this.input.brake > 0.5 && sp > 0.55 * this.stats.topSpeed && (fr % 3) === 0 && sf !== 'water') {
+        for (let w = 0; w < 2; w++) {
+          const lx = (w ? 0.8 : -0.8) * sc, lz = -0.75 * sc;
+          S.endColor(0.88, 0.88, 0.9);
+          S.spawn(3, 0, this.pos.x + lx * vc + lz * vs, py + 0.15, this.pos.z - lx * vs + lz * vc, (rnd() - 0.5) * 1.5, 0.7 + rnd() * 0.6, (rnd() - 0.5) * 1.5, 0.7, 0.5, 1.9, 0.9, 0.9, 0.92, 0.5, -0.3, 1.6);
+        }
+      }
+
+      // ---- star: rainbow afterimages trailing the kart + orbiting sparkles
+      if (this.starTimer > 0) {
+        if ((fr & 1) === 0) {
+          this._fxHue = ((this._fxHue || 0) + 0.07) % 1;
+          const h6 = this._fxHue * 6, ci = h6 | 0, f = h6 - ci;
+          const rr = ci === 0 || ci === 5 ? 1 : ci === 1 ? 1 - f : ci === 4 ? f : 0, gg = ci === 0 ? f : ci === 1 || ci === 2 ? 1 : ci === 3 ? 1 - f : 0, bb = ci === 2 ? f : ci === 3 || ci === 4 ? 1 : ci === 5 ? 1 - f : 0;
+          A.endColor(rr, gg, bb);
+          A.spawn(0, 0, this.pos.x - sn * 0.6, py + 0.55 * sc, this.pos.z - cs * 0.6, 0, 0.1, 0, 0.42, 2.0 * sc, 0.5, rr, gg, bb, 0.55, 0, 0);
+        }
+        if ((fr % 5) === 0) {
+          const a = rnd() * TAU;
+          A.endColor(1, 1, 0.5);
+          A.spawn(1, 0, this.pos.x + Math.cos(a) * 1.1 * sc, py + (0.4 + rnd() * 1.1) * sc, this.pos.z + Math.sin(a) * 1.1 * sc, 0, 0.8, 0, 0.4, 0.55, 0.05, 1, 1, 0.7, 1, 0, 0);
+        }
+      }
+
+      // ---- paint glints: a twinkle on the outside flank while turning hard
+      if (!air && Math.abs(this._steerVis) > 0.45 && spd01 > 0.3 && (fr % 17) === (this.index % 17)) {
+        const sg = this._steerVis > 0 ? -1 : 1;
+        A.endColor(1, 1, 1);
+        A.spawn(1, 0, this._wx(rnd() * 0.8 - 0.2, sg * 0.85), py + 0.55 * sc + rnd() * 0.3, this._wz(rnd() * 0.8 - 0.2, sg * 0.85), 0, 0, 0, 0.22, 0.7, 0.1, 1, 1, 0.95, 0.95, 0, 0);
       }
 
       // ---- offroad clods + water spray arcs
@@ -2422,4 +2470,5 @@
   function inp0(k) { return k.input && k.input.accel > 0.5; }
 
   G.Kart = Kart;
+  Kart._addFace = addFace;   // test hook
 })();
