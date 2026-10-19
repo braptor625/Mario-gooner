@@ -457,6 +457,112 @@
     rider.userData.bs = rider.scale.x;
   }
 
+
+  // ---- face overlays (eyelids + open mouth): the baked rider head has painted eyes, so skin-coloured lids slide over them for
+  // blinks / squints and a dark mouth ellipsoid pops out for cheers and yelps. Located by scanning the head's pupil vertices once
+  // per cached geometry; hidden (no draw call) whenever idle.
+  let lidGeo = null, mouthGeo = null, mouthMat = null;
+  const faceCache = new WeakMap();
+  function findFace(geo) {
+    let f = faceCache.get(geo);
+    if (f !== undefined) return f;
+    f = null;
+    const pos = geo.attributes.position, col = geo.attributes.color;
+    if (pos && col) {
+      const tr = 0x12 / 255, tg = 0x0f / 255, tb = 0x18 / 255;
+      const acc = [[0, 0, 0, 0, 1e9, -1e9], [0, 0, 0, 0, 1e9, -1e9]];
+      for (let i = 0; i < pos.count; i++) {
+        if (Math.abs(col.getX(i) - tr) > 0.02 || Math.abs(col.getY(i) - tg) > 0.02 || Math.abs(col.getZ(i) - tb) > 0.02) continue;
+        const x = pos.getX(i), a = acc[x > 0 ? 1 : 0];
+        a[0] += x; a[1] += pos.getY(i); a[2] += pos.getZ(i); a[3]++;
+        if (Math.abs(x) < a[4]) a[4] = Math.abs(x);
+        if (Math.abs(x) > a[5]) a[5] = Math.abs(x);
+      }
+      if (acc[0][3] > 3 && acc[1][3] > 3) {
+        const ex = (Math.abs(acc[0][0] / acc[0][3]) + Math.abs(acc[1][0] / acc[1][3])) * 0.5;
+        const ey = (acc[0][1] / acc[0][3] + acc[1][1] / acc[1][3]) * 0.5, pz = (acc[0][2] / acc[0][3] + acc[1][2] / acc[1][3]) * 0.5;
+        const pr = (acc[1][5] - acc[1][4]) * 0.5;      // pupil radius = R * 0.38
+        const R = clamp(pr / 0.38, 0.05, 0.12);
+        // mouth: find the front-most vertex near the face's centre line below the eyes
+        const my = ey - 0.15;
+        let mz = -1;
+        for (let i = 0; i < pos.count; i++) {
+          if (Math.abs(pos.getX(i)) < 0.06 && Math.abs(pos.getY(i) - my) < 0.05 && pos.getZ(i) > mz) mz = pos.getZ(i);
+        }
+        if (mz < 0) mz = pz - 0.03;
+        f = { ex, ey, ez: pz - 0.008 - 0.485 * R, R, my, mz: mz - 0.012 };
+      }
+    }
+    faceCache.set(geo, f);
+    return f;
+  }
+  function addFace(rider) {
+    if (!rider || rider.userData.face) return;
+    const head = rider.userData.head;
+    if (!head || !head.geometry) return;
+    const f = findFace(head.geometry);
+    if (!f) return;
+    if (!lidGeo) {
+      lidGeo = new THREE.SphereGeometry(1, 10, 8);
+      mouthGeo = new THREE.SphereGeometry(1, 8, 6);
+      mouthMat = new THREE.MeshLambertMaterial({ color: 0x3a0f18 });
+    }
+    const id = (rider.name || '').replace('rider_', '');
+    const ch = G.CHARACTERS && G.CHARACTERS.find((c) => c.id === id);
+    const skin = armMat(ch ? ch.colors.skin : 0xffcc99);
+    // both lids in one mesh (shared Y scale): two skin ellipsoids that hide the painted eyes
+    const lids = new THREE.Mesh(mergeLids(f), skin);
+    lids.visible = false;
+    const mouth = new THREE.Mesh(mouthGeo, mouthMat);
+    mouth.position.set(0, f.my, f.mz);
+    mouth.visible = false;
+    head.add(lids, mouth);
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+    rider.userData.face = { lids, mouth, f, H: f.R * 1.28, blink: 1 + Math.random() * 3.5, bt: 0, lk: 0, mk: 0 };
+    rider.userData.flair = Math.abs(h) % 4;
+  }
+  const lidGeos = {};
+  function mergeLids(f) {
+    const key = f.ex.toFixed(3) + f.ey.toFixed(3) + f.ez.toFixed(3) + f.R.toFixed(3);
+    if (lidGeos[key]) return lidGeos[key];
+    const P = [], N = [], I = [];
+    let base = 0;
+    const mtx = new THREE.Matrix4(), v = new THREE.Vector3();
+    for (let sd = -1; sd <= 1; sd += 2) {
+      mtx.makeScale(f.R * 1.1, f.R * 1.28, f.R * 0.62).setPosition(sd * f.ex, 0, f.ez + 0.004);
+      const pa = lidGeo.attributes.position, na = lidGeo.attributes.normal, ia = lidGeo.index;
+      for (let i = 0; i < pa.count; i++) {
+        v.fromBufferAttribute(pa, i).applyMatrix4(mtx); P.push(v.x, v.y, v.z);
+        N.push(na.getX(i), na.getY(i), na.getZ(i));
+      }
+      for (let i = 0; i < ia.count; i++) I.push(ia.getX(i) + base);
+      base += pa.count;
+    }
+    const bg = new THREE.BufferGeometry();
+    bg.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+    bg.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+    bg.setIndex(I);
+    return (lidGeos[key] = bg);
+  }
+  function setFace(r, lk, mk) {
+    const fc = r.userData.face;
+    if (!fc) return;
+    const lids = fc.lids, mouth = fc.mouth;
+    if (lk < 0.03) lids.visible = false;
+    else {
+      lids.visible = true;
+      lids.scale.y = lk;
+      lids.position.y = fc.f.ey + fc.H * (1 - lk);
+    }
+    if (mk < 0.04) mouth.visible = false;
+    else {
+      mouth.visible = true;
+      const R = fc.f.R;
+      mouth.scale.set(R * (0.75 + 0.35 * mk), R * (0.15 + 0.85 * mk) * 0.95, R * 0.55);
+    }
+  }
+
   // item ids used instantly (fist pump) vs thrown / dropped (wind-up + throw)
   const INSTANT_ITEM = { mushroom: 1, mushroom3: 1, mushroom_gold: 1, star: 1, lightning: 1, chomp: 1 };
   let evHooked = false;
@@ -593,6 +699,7 @@
       this._armW = [0, 0]; this._prevHeld0 = null; this._prevHeld1 = null; this._prevPos = 0; this._rev = 0; this._popT = 0;
       this._sk = new Float32Array(16); this._skOn = new Uint8Array(2);
       this._revAI = Math.random() < 0.6; this._holdW = 0;
+      this._tauntT = 0; this._antic = 0; this._psv = 0; this._pjs = 0; this._kickJ = 0; this._wasAirR = false; this._jr = null; this._sparkCd = 0;
 
       // model
       let model = null;
@@ -612,10 +719,11 @@
       // suspended parts (move relative to the wheels): body, chrome, seats -> [obj, baseY, obj, baseY, ...]
       this._susp = [];
       model.group.traverse((o) => { if (o === model.body || o === model.frontSeat || o === model.rearSeat || o.name === 'kartChrome') this._susp.push(o, o.position.y); });
-      addArms(model.front); addArms(model.rear);
+      addArms(model.front); addArms(model.rear); addFace(model.front); addFace(model.rear);
       if (!evHooked && G.events && G.events.on) {
         evHooked = true;
         G.events.on('itemUsed', (d) => { if (d && d.kart && d.kart._onItemUsed) d.kart._onItemUsed(d.item); });
+        G.events.on('itemHit', (d) => { const a = d && d.attacker; if (a && a !== d.victim && a._taunt) a._taunt(); });
       }
 
       // clone materials of body for star flashing
@@ -795,7 +903,13 @@
     _cheer(dur, kind) {
       if (this.ghost || this.spinTimer > 0 || this.squishTimer > 0) return;
       if (this._cheerT > 0 && this._cheerK > kind && this._cheerT > dur) return;
-      this._cheerT = dur; this._cheerDur = dur; this._cheerK = kind;
+      this._cheerT = dur; this._cheerDur = dur; this._cheerK = kind; this._kickJ = 1;
+    }
+
+    // gloating after one of our items lands on somebody
+    _taunt() {
+      if (this.ghost || this.spinTimer > 0 || this.squishTimer > 0 || this._tauntT > 0.3) return;
+      this._tauntT = 1.0; this._kickJ = 1;
     }
 
     _onItemUsed(item) {
@@ -1583,6 +1697,7 @@
       if (this._cheerT > 0) this._cheerT -= dt;
       if (this._cheerCd > 0) this._cheerCd -= dt;
       if (this._throwT > 0) this._throwT -= dt;
+      if (this._tauntT > 0) this._tauntT -= dt;
       const hitting = this.spinTimer > 0 || this.squishTimer > 0;
       if (!hitting && this._dizzy > 0) this._dizzy -= dt;
 
@@ -1826,6 +1941,27 @@
       }
 
       const dr = m.front, th = m.rear;
+      // ramp anticipation: both riders crouch as a jump ramp approaches, then the kart stretches off the lip
+      let an = 0;
+      if (!this.airborne && this.speed > 8 && !hitting && this.track && this.track.rects) {
+        if (!this._jr) { this._jr = []; const rs = this.track.rects; for (let i = 0; i < rs.length; i++) if (rs[i].kind === 'jump') this._jr.push(rs[i]); }
+        const jr = this._jr, d = this.trackInfo.dist, lat = this.trackInfo.lateral;
+        for (let i = 0; i < jr.length; i++) {
+          const q = jr[i];
+          if (d > q.d0 - 10 && d < q.d0 + 0.5 && lat > q.l0 - 2 && lat < q.l1 + 2) { an = clamp((d - (q.d0 - 10)) / 7, 0, 1); break; }
+        }
+      }
+      this._antic = damp(this._antic, an, 9, dt);
+      if (this.airborne && !this._wasAirR && this._antic > 0.3) { this._sqV += 5; this._susV += 1.2; }
+      this._wasAirR = this.airborne;
+      const antic = this._antic;
+      const gm = G.Game;
+      const gridPose = !!gm && (gm.state === 'intro' || gm.state === 'countdown') && !hitting && this.speed < 2;
+      const gridWave = gridPose && gm.state === 'intro' && (this.isPlayer || (this.index % 3) === 0);
+      const tntE = this._tauntT > 0 ? Math.min(1, this._tauntT * 5, (1 - this._tauntT) * 12) : 0;
+      const srate = dt > 0 ? (this._steerVis - this._psv) / dt : 0, accl = dt > 0 ? (this.speed - this._pjs) / dt : 0;
+      this._psv = this._steerVis; this._pjs = this.speed;
+      const kick = this._kickJ; this._kickJ = 0;
       const cheerEnv = this._cheerT > 0 ? Math.min(1, (this._cheerDur - this._cheerT) * 12, this._cheerT * 7) : 0;
       const cheerK = this._cheerK;
       const flail = this.spinTimer > 0;
@@ -1868,12 +2004,34 @@
           wR = cheerEnv; thR = 0.05 + wave * 0.22; outR = 0.55 + cheerK * 0.3;
           if (cheerK > 0.5) { wL = cheerEnv; thL = 0.05 - wave * 0.22; outL = outR; }
         }
+        const fl = ud.flair | 0, big = cheerEnv > 0.02 && cheerK > 0.5;
+        if (!swapping && !flail) {
+          if (role === 1 && gridWave && cheerEnv < 0.02) { wR = 1; thR = 0.1 + Math.sin(t * 7.5 + ph) * 0.35; outR = 0.95; }
+          if (role === 1 && tntE > 0.02 && cheerEnv < 0.02) { wR = tntE; thR = 0.45 + Math.sin(t * 21) * 0.3; outR = 0.5; }
+          if (big) {
+            if (fl === 2) { wL = 0; thR = 0.3 - Math.abs(Math.sin(t * 7 + ph)) * 0.9; outR = 0.2; }
+            else if (fl === 3) { thR = 0.05 + wave * 0.5; thL = 0.05 - wave * 0.5; outR = outL = 0.9; }
+          }
+        }
         if (role === 1 && !swapping && !flail) {
           if (tW > 0.02) { wR = Math.max(wR, tW); thR = wR === tW ? tArm : thR; outR = tOut; }
         }
         // driver steers with both hands up on the wheel when drifting: arms lowered, tiny counter-steer wiggle shown via twist
         this._arm(r, 0, thR, outR, wR);
         this._arm(r, 1, thL, outL, wL);
+
+        const fc = ud.face;
+        if (fc) {
+          let lk = 0;
+          fc.blink -= dt;
+          if (fc.blink <= 0) { fc.bt = 0.16; fc.blink = 1.8 + rnd() * 3.5; }
+          if (fc.bt > 0) { fc.bt -= dt; lk = Math.sin(clamp(fc.bt / 0.16, 0, 1) * Math.PI); }
+          const tl = hitting ? 0.95 : this._dizzy > 0 ? 0.5 : big ? 0.62 : tntE > 0.5 ? 0.45 : this.boostTimer > 0 ? 0.28 : this.burnoutTimer > 0 ? 0.4 : 0;
+          fc.lk = damp(fc.lk, tl, 20, dt);
+          const tm = hitting ? 0.85 + 0.15 * Math.sin(t * 25) : tntE > 0.02 ? 0.75 * tntE : cheerEnv > 0.02 ? (0.45 + 0.55 * Math.abs(Math.sin(t * 9 + ph))) * cheerEnv : this.boostTimer > 0 ? 0.5 : this._dizzy > 0 ? 0.35 : this.burnoutTimer > 0 ? 0.6 : 0;
+          fc.mk = damp(fc.mk, tm, 22, dt);
+          setFace(r, Math.max(lk, fc.lk), fc.mk);
+        }
 
         if (swapping) {
           if (head) { head.rotation.y = 0; head.rotation.x = 0; head.rotation.z = 0; }
@@ -1883,9 +2041,12 @@
         // body
         let rx, ry, rz, py, sY = 1 + Math.sin(t * 2.3 + ph) * 0.014;
         const bob = Math.sin(t * 5.5 + ph) * 0.006 + Math.sin(fr * 0.42 + ph) * 0.012 * Math.min(spd01, 1);
-        const bounce = cheerEnv > 0.02 ? Math.abs(Math.sin(t * (cheerK > 0.5 ? 11 : 15) + ph)) * (cheerK > 0.5 ? 0.16 : 0.12) * cheerEnv : 0;
+        let bounce = cheerEnv > 0.02 ? Math.abs(Math.sin(t * (cheerK > 0.5 ? 11 : 15) + ph)) * (cheerK > 0.5 ? 0.16 : 0.12) * cheerEnv : 0;
+        if (big && fl === 0) bounce *= 2.1;
+        if (gridPose && role === 1) bounce += Math.abs(Math.sin(t * 6.28 + ph)) * 0.05;
+        if (tntE > 0.02 && role === 1) bounce += Math.abs(Math.sin(t * 14)) * 0.07 * tntE;
         rz = role ? this._leanR : this._leanF * 1.25;
-        rx = this._pitchDyn * 2.4 - this._wh * 0.5 + slump * 0.55 - cheerEnv * 0.2;
+        rx = this._pitchDyn * 2.4 - this._wh * 0.5 + slump * 0.55 - cheerEnv * 0.2 + antic * 0.3;
         ry = 0;
         if (role === 0) {
           ry = ddir * 0.3 * this._driftVis - this._steerVis * 0.22 * this._driftVis + this._lbk * 0.9;
@@ -1896,8 +2057,15 @@
             rz = this._slapSide * 1.15 * sw; ry = this._slapSide * 0.9 * sw; rx = -0.25 * sw;
           } else if (tW > 0.02) { ry += tYaw; rx += tTilt; }
         }
+        if (big) {
+          if (fl === 1) { const cyc = (t * 0.55 + ph) % 1; if (cyc < 0.4) { const u = cyc / 0.4; ry += u * u * (3 - 2 * u) * TAU; bounce += Math.sin(u * Math.PI) * 0.18; } }
+          else if (fl === 3) { rz += Math.sin(t * 6 + ph) * 0.38 * cheerEnv; ry += Math.sin(t * 3 + ph) * 0.4 * cheerEnv; }
+          else if (fl === 2) rx -= Math.abs(Math.sin(t * 7 + ph)) * 0.18;
+        }
+        if (tntE > 0.02) { rz += Math.sin(t * 9) * 0.22 * tntE * (role ? 1 : 0.4); if (!role) ry += 0.7 * tntE; }
         if (slump > 0.05 && flail) { rz += Math.sin(t * 14 + ph) * 0.4 * slump; rx += Math.sin(t * 11 + ph) * 0.25; }
-        py = by + bob + bounce + this._sus * 0.7 - slump * 0.11;
+        py = by + bob + bounce + this._sus * 0.7 - slump * 0.11 - antic * 0.07;
+        sY -= antic * 0.05;
         sY += cheerEnv * 0.05 * Math.sin(t * 22) + this._sus * 1.1 + this._sq * 0.45;
         r.rotation.set(rx, ry, rz);
         r.position.y = py;
@@ -1916,7 +2084,18 @@
           if (Math.abs(this.speed) < 3) yaw += Math.sin(t * 0.8 + ph) * 0.35;
           yaw += this._lbk * (role ? -1.2 : 1.7);
           if (cheerEnv > 0.02) { hx = -0.25 * cheerEnv; hz = Math.sin(t * 9 + ph) * 0.13 * cheerEnv; }
-          hx += slump * 0.5;
+          hx += slump * 0.5 + antic * 0.12;
+          // secondary motion: hair / ears / antennae lag behind via a spring that reacts to steering, acceleration and cheers
+          let jd = ud.jd;
+          if (!jd) { jd = ud.jd = [0, 0, 0, 0]; ud.hs0 = head.scale.x; }
+          jd[1] += (-jd[0] * 150 - jd[1] * 5.5 - srate * (role ? 3.4 : 4.6)) * dt;
+          jd[0] = clamp(jd[0] + jd[1] * dt, -0.6, 0.6);
+          jd[3] += (-jd[2] * 190 - jd[3] * 6 - clamp(accl, -30, 30) * 0.045 - this._sqV * 0.03 + (kick ? 5 : 0)) * dt;
+          jd[2] = clamp(jd[2] + jd[3] * dt, -0.2, 0.22);
+          hz -= jd[0] * 0.5; hx += jd[0] * 0.08;
+          const hs0 = ud.hs0, jy = jd[2];
+          head.scale.set(hs0 * (1 - jy * 0.45), hs0 * (1 + jy), hs0 * (1 - jy * 0.45));
+          if (tntE > 0.02) hz += Math.sin(t * 12) * 0.2 * tntE;
           if (this._dizzy > 0 || hitting) { const dz = hitting ? 1 : clamp(this._dizzy * 1.5, 0, 1); hz += Math.sin(t * 6.5 + ph) * 0.22 * dz; hx += Math.sin(t * 5 + ph + 1) * 0.18 * dz; yaw += Math.sin(t * 4 + ph) * 0.4 * dz; }
           const k = 1 - Math.exp(-11 * dt);
           head.rotation.y += (yaw - head.rotation.y) * k;
