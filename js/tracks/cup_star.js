@@ -280,11 +280,10 @@
   function frostyDecor(dLake, dCave, dLake2) {
     return function (track, kit) {
       const rng = kit.rng, col = kit.col, gy = kit.groundY, L = kit.length;
-      const b = new kit.Batch();
+      const b = new kit.Batch(), pf = new kit.Batch();   // pf: pines (wind-swayed)
       const white = [1, 1, 1];
       // ---- big frozen lake discs (glossy) under the ice zones
-      const lakeMat = new T.MeshPhongMaterial({ color: 0x9fd6ff, shininess: 110, specular: 0xffffff, transparent: true, opacity: 0.93 });
-      kit.trackMat(lakeMat);
+      const lakeMat = kit.waterMat({ color: 0x9fd6ff, deep: 0x5aa8e0, opacity: 0.93, waveScale: 0.25 });   // glossy ice, faint glints
       for (const lk of [{ d: dLake, r: 118 }, { d: dLake2, r: 58 }]) {
         const f = kit.frame(lk.d);
         const geo = kit.trackGeom(new T.CircleGeometry(lk.r, 36)); geo.rotateX(-Math.PI / 2);
@@ -296,12 +295,12 @@
       const m0 = 11 + 5 + 10 + 4;
       kit.scatter(230, 3, 90, m0, (x, z, i, r) => {
         const s = 0.9 + r() * 1.1;
-        b.box(x, gy, z, 0.5 * s, 1.6 * s, 0.5 * s, 0, col(0x5a3d2a));
+        pf.box(x, gy, z, 0.5 * s, 1.6 * s, 0.5 * s, 0, col(0x5a3d2a));
         const g = colj(kit, col(0x1f6b57), r, 0.12);
         for (let k = 0; k < 4; k++) {
           const r0 = (2.9 - k * 0.65) * s, hh = 2.9 * s, yy = gy + (1.3 + k * 1.7) * s;
-          b.frustum(x, yy, z, r0, 0, hh, 7, g, r());
-          b.frustum(x, yy + hh * 0.36, z, r0 * 0.64, 0, hh * 0.64, 7, white, 0);
+          pf.frustum(x, yy, z, r0, 0, hh, 7, g, r());
+          pf.frustum(x, yy + hh * 0.36, z, r0 * 0.64, 0, hh * 0.64, 7, white, 0);
         }
       });
       kit.scatter(110, 1, 70, m0 - 4, (x, z, i, r) => {
@@ -331,6 +330,11 @@
         b.frustum(x, gy - 3 + h * 0.5, z, s * 0.52, 0, h * 0.5, 6, white, 0);
       });
       kit.mesh(b, {}, false);
+      kit.foliage(pf, { strength: 0.3, heightScale: 0.16 });
+      kit.crowdStand({ d0: L - 50, d1: L + 70, side: -1, l0: 11 + 5 + 3.5, rows: 2, gap: 1.3, rise: 0, step: 2.3, scale: 1.1, radius: 55, colors: [0x2c7ed6, 0xe8383d, 0xffd23a, 0xffffff, 0x35c0d9, 0xff8ad0] });
+      kit.crowdStand({ d0: L - 50, d1: L + 70, side: 1, l0: 11 + 5 + 3.5, rows: 2, gap: 1.3, rise: 0, step: 2.3, scale: 1.1, radius: 55, colors: [0x2c7ed6, 0xe8383d, 0xffd23a, 0xffffff, 0x35c0d9, 0xff8ad0] });
+      for (let d = 10; d < 160; d += 30) for (let sd = -1; sd <= 1; sd += 2) kit.flagAt(d, sd * (11 + 5 + 1.2), 2.4, 1.4, [[0x2c7ed6, 0xffffff], [0xe8383d, 0xffffff]][((d / 30) | 0) & 1], { pole: 6.5 });
+      kit.birds({ cx: 150, cz: 120, y: 48, radius: 130, count: 7, speed: 0.1, body: 0x808890, wing: 0xffffff });
 
       // ---- ice cave in the S-bend
       const cb = new kit.Batch(), cI = col(0xbfe6ff), cI2 = col(0x9fd2f5), cO = col(0xeaf6ff), cO2 = col(0xd6ecfa);
@@ -362,7 +366,10 @@
       for (let d = d0 + 8; d < d1 - 4; d += 12) for (const s of [-1, 1]) {
         const p = kit.at(d, s * 17.2, 1.2); lb.box(p[0], p[1], p[2], 0.7, 0.7, 0.7, 0, col(0x9fe8ff));
       }
-      kit.mesh(lb, {}, true);
+      { const lm = kit.mesh(lb, {}, true); if (lm) kit.blinker(lm.material, 3.0, { mode: 'sine', lo: 0.55 }); }
+      // dripping meltwater under the cave roof
+      { const em = []; for (let d = d0 + 8; d < d1 - 6; d += 7) { const l = (rng() - 0.5) * 18, f = kit.frame(d); em.push([f.x + f.rx * l, f.y + 11.5 - Math.abs(l) * 0.32, f.z + f.rz * l]); }
+        kit.particles({ emitters: em, count: 2, vel: [0, 0, 0], spread: [0.05, 0, 0.05], life: 1.3, grav: -16, size: 0.32, alpha: 0.9, pow: 0.4, fadeIn: 0.02, color: [0xcdf0ff, 0xffffff] }); }
     };
   }
 
@@ -531,15 +538,16 @@
       const tints = [col(0xffb0e8), col(0x9ff0ff), col(0xffd98a), col(0xb9a8ff), col(0xa8ffd0), col(0xff9a9a)];
       const nb = new kit.Batch();  // neon trims / signs poles / lamps (unlit)
       const roofCols = [col(0xff3df0), col(0x3df2ff), col(0xffe14a), col(0x8f6bff)];
+      const rb = roofCols.map(() => new kit.Batch());   // roof neon per colour: each blinks on its own phase
       const bldgs = [];
       const place = (x, z, w, dp, h, ry) => {
         const k = tints[(rng() * tints.length) | 0];
         tbox(x, gy - 1, z, w, h + 1, dp, ry, k);
         // roof neon trim + antenna
-        const rc = roofCols[(rng() * roofCols.length) | 0];
+        const ri = (rng() * roofCols.length) | 0, rc = roofCols[ri];
         for (const e of [[w / 2, 0, 0.5, dp], [-w / 2, 0, 0.5, dp], [0, dp / 2, w, 0.5], [0, -dp / 2, w, 0.5]]) {
           const c0 = Math.cos(ry), s0 = Math.sin(ry);
-          nb.box(x + e[0] * c0 + e[1] * s0, gy + h, z - e[0] * s0 + e[1] * c0, e[2], 0.6, e[3], ry, rc);
+          rb[ri].box(x + e[0] * c0 + e[1] * s0, gy + h, z - e[0] * s0 + e[1] * c0, e[2], 0.6, e[3], ry, rc);
         }
         if (h > 55 && rng() < 0.7) { nb.box(x, gy + h, z, 0.4, 10, 0.4, 0, [0.9, 0.9, 1]); nb.box(x, gy + h + 10, z, 0.8, 0.8, 0.8, 0, [1, 0.2, 0.2]); }
         bldgs.push({ x, z, w, dp, h, ry });
@@ -613,8 +621,7 @@
           nb.box(p[0], p[1], p[2], 0.5, 0.5, 0.5, 0, col(0xff3df0));
         }
         // canal water
-        const wm = new T.MeshPhongMaterial({ color: 0x0a2850, shininess: 160, specular: 0x66e6ff, transparent: true, opacity: 0.93 });
-        kit.trackMat(wm);
+        const wm = kit.waterMat({ color: 0x1a5a9a, deep: 0x061830, opacity: 0.93 });
         const wg = kit.trackGeom(new T.PlaneGeometry(40, 210)); wg.rotateX(-Math.PI / 2);
         const wmesh = new T.Mesh(wg, wm); wmesh.position.set(315, gy + 0.12, 35); kit.add(wmesh);
         for (const x of [293.5, 336.5]) nb.box(x, gy, 35, 3, 1.4, 210, 0, col(0x59a0b8));
@@ -633,13 +640,14 @@
           c.shadowColor = fg; c.shadowBlur = 12; c.fillStyle = '#ffffff'; c.fillText(nm, x + 128, y + 34); c.shadowBlur = 0;
         });
       });
-      const SP = [], SU = [];
+      const SP = [], SU = [], SP2 = [], SU2 = [];
       const sign = (p, hy, w, h, idx) => {
+        const SPx = idx & 1 ? SP2 : SP, SUx = idx & 1 ? SU2 : SU;
         const cx = Math.cos(hy), sx = Math.sin(hy), u0 = (idx % 2) * 0.5, v1 = 1 - Math.floor(idx / 2) * 0.25, v0 = v1 - 0.25;
         const q = (l, y) => [p[0] + cx * l, p[1] + y, p[2] - sx * l];
         const a = q(-w / 2, 0), b = q(w / 2, 0), c = q(w / 2, h), d = q(-w / 2, h);
         const uu = [[u0, v0], [u0 + 0.5, v0], [u0 + 0.5, v1], [u0, v1]];
-        for (const [pp, u] of [[a, uu[0]], [b, uu[1]], [c, uu[2]], [a, uu[0]], [c, uu[2]], [d, uu[3]]]) { SP.push(pp[0], pp[1], pp[2]); SU.push(u[0], u[1]); }
+        for (const [pp, u] of [[a, uu[0]], [b, uu[1]], [c, uu[2]], [a, uu[0]], [c, uu[2]], [d, uu[3]]]) { SPx.push(pp[0], pp[1], pp[2]); SUx.push(u[0], u[1]); }
       };
       // billboards on stilts facing the road, and flush signs on nearby buildings
       let si = 0;
@@ -668,12 +676,37 @@
       const bm = kit.trackMat(new T.MeshBasicMaterial(wt ? { map: wt, vertexColors: true } : { vertexColors: true, color: 0x555577 }));
       const bmesh = new T.Mesh(bg, bm); bmesh.frustumCulled = false; kit.add(bmesh);
       kit.mesh(nb, {}, true);
-      if (SP.length) {
+      rb.forEach((bt, i) => { const m = kit.mesh(bt, {}, true); if (m) kit.blinker(m.material, 2.1 + i * 0.55, { duty: 0.72, phase: i * 0.27, lo: 0.3 }); });   // roof neon flickers
+      [[SP, SU, 0], [SP2, SU2, 1]].forEach(([SPx, SUx, k]) => {
+        if (!SPx.length) return;
         const sg = new T.BufferGeometry();
-        sg.setAttribute('position', new T.Float32BufferAttribute(SP, 3)); sg.setAttribute('uv', new T.Float32BufferAttribute(SU, 2));
+        sg.setAttribute('position', new T.Float32BufferAttribute(SPx, 3)); sg.setAttribute('uv', new T.Float32BufferAttribute(SUx, 2));
         sg.computeBoundingSphere(); kit.trackGeom(sg);
         const sm = kit.trackMat(new T.MeshBasicMaterial(at ? { map: at, side: T.DoubleSide } : { color: 0xff3df0, side: T.DoubleSide }));
+        kit.blinker(sm, 3.3 + k * 1.1, { duty: 0.86, phase: k * 0.45, lo: 0.4 });   // sign boards buzz on and off
         const smesh = new T.Mesh(sg, sm); smesh.frustumCulled = false; kit.add(smesh);
+      });
+      // ---- traffic lights cycling red -> green -> yellow at the crossings
+      {
+        const lamp = [new kit.Batch(), new kit.Batch(), new kit.Batch()], lc = [[1, 0.15, 0.15], [1, 0.85, 0.1], [0.2, 1, 0.35]], pole = new kit.Batch();
+        for (const d of [L * 0.15, L * 0.38, L * 0.6, L * 0.78]) for (const sd of [-1, 1]) {
+          const f = kit.frame(d - 3), hy = Math.atan2(f.tx, f.tz), l = sd * (HW + 3.2), p = kit.at(d - 3, l, 0);
+          pole.box(p[0], p[1], p[2], 0.35, 6.3, 0.35, hy, [0.35, 0.35, 0.5]); pole.box(p[0], p[1] + 4.2, p[2], 0.9, 2.6, 0.7, hy, [0.08, 0.08, 0.12]);
+          for (let k = 0; k < 3; k++) { const q = kit.at(d - 3, l - sd * 0.01, 6.4 - k * 0.85); lamp[k].box(q[0] - f.tx * 0.4, q[1] - 0.25, q[2] - f.tz * 0.4, 0.55, 0.55, 0.2, hy, lc[k]); }
+        }
+        kit.mesh(pole, {}, false);
+        lamp.forEach((bt, k) => { const m = kit.mesh(bt, {}, true); if (m) kit.blinker(m.material, 8, { duty: [0.45, 0.1, 0.4][k], phase: [0.5, 0.4, 0.0][k], lo: 0.1 }); });
+      }
+      // ---- sweeping searchlights from the tallest towers, fireworks above the skyline, steam vents, start-straight crowd, neon banners
+      {
+        const tall = bldgs.filter((q) => q.h > 90).slice(0, 5);
+        tall.forEach((q, i) => kit.lightBeam({ x: q.x, y: gy + q.h + 1, z: q.z, len: 150, width: 5, speed: (i & 1 ? 0.35 : -0.42), phase: i * 1.4, tilt: 0.8, count: 1, color: i & 1 ? 0xff7af5 : 0x7af2ff, opacity: 0.5 }));
+        const em = []; for (let k = 0; k < 6; k++) { const a = k * 1.1 + 0.3; em.push([140 + Math.cos(a) * 230, 120 + (k % 3) * 20, 130 + Math.sin(a) * 180]); }
+        kit.particles({ emitters: em, count: 60, sphere: 24, life: 6.5, win: 0.32, grav: -9, size: 2.4, grow: -0.5, alpha: 1, pow: 0.6, fadeIn: 0.04, color: [0xff4060, 0x40d0ff, 0xffe040, 0x70ff70, 0xff80ff, 0xffa030], burst: true, tex: 'spark', additive: true });
+        const vents = []; for (let d = 40; d < L - 20; d += 95) vents.push(kit.at(d, (rng() < 0.5 ? -1 : 1) * (HW - 0.6), 0.1));
+        kit.particles({ emitters: vents, count: 7, vel: [0, 2.2, 0], spread: [0.5, 0.6, 0.5], life: 2.6, size: 2.6, grow: 2.2, alpha: 0.35, pow: 1.2, wob: 0.6, color: [0xc8d0ff, 0xffffff] });
+        for (const sd of [-1, 1]) kit.crowdStand({ d0: L - 50, d1: L + 70, side: sd, l0: HW + 4 + 3.2, rows: 2, gap: 1.3, rise: 0, step: 2.4, scale: 1.1, radius: 55, colors: [0xff3df0, 0x3df2ff, 0xffe14a, 0x8f6bff, 0xffffff] });
+        for (const d of [L * 0.03, L * 0.27, L * 0.55, L * 0.88]) { const f = kit.frame(d), hy = Math.atan2(f.tx, f.tz); kit.banner(f.x, f.y + 4.2, f.z, 5, 4, hy, d % 2 ? [0xff3df0, 0x3df2ff] : [0x3df2ff, 0xff3df0], { pattern: 'vstripes' }); }
       }
     };
   }
@@ -894,8 +927,8 @@
       // sea plane (same lambert colour as the far shelf)
       {
         const g = kit.trackGeom(new T.PlaneGeometry(7000, 7000)); g.rotateX(-Math.PI / 2);
-        const m = new T.Mesh(g, kit.trackMat(new T.MeshLambertMaterial({ color: 0x087096 })));
-        m.position.set(0, 0, 0); m.frustumCulled = false; kit.add(m);
+        const m = new T.Mesh(g, kit.waterMat({ color: 0x3fc2b4, deep: 0x087096, opacity: 0.84 }));   // animated sea over the baked shallows
+        m.position.set(0, 0.1, 0); m.frustumCulled = false; kit.add(m);
       }
       // random point helper (accepts via cb returning true)
       let bbx0 = 1e9, bbx1 = -1e9, bbz0 = 1e9, bbz1 = -1e9;
@@ -908,22 +941,22 @@
           if (cb(x, z)) k++;
         }
       };
-      const b = new kit.Batch();
+      const b = new kit.Batch(), pbat = new kit.Batch();   // pbat: palms (wind-swayed)
       // ---- palms
       const trunk = col(0x9a6a3a), frond = [col(0x2f9a3a), col(0x3fb04a), col(0x58c25a)];
       const palm = (x, y, z, s, r) => {
         const lean = (r() - 0.5) * 2.2, ang = r() * TAU;
         const dx = Math.cos(ang) * lean * s, dz = Math.sin(ang) * lean * s;
         const p0 = [x, y, z], p1 = [x + dx * 0.5, y + 3.2 * s, z + dz * 0.5], p2 = [x + dx, y + 6.6 * s, z + dz];
-        tube(b, p0, p1, 0.38 * s, 0.3 * s, 5, trunk); tube(b, p1, p2, 0.3 * s, 0.24 * s, 5, trunk);
+        tube(pbat, p0, p1, 0.38 * s, 0.3 * s, 5, trunk); tube(pbat, p1, p2, 0.3 * s, 0.24 * s, 5, trunk);
         for (let f = 0; f < 7; f++) {
           const a = (f / 7) * TAU + r(), c = Math.cos(a), sn = Math.sin(a), len = 3.4 * s;
           const tip = [p2[0] + c * len, p2[1] - 1.5 * s, p2[2] + sn * len], mid = [p2[0] + c * len * 0.5, p2[1] + 0.9 * s, p2[2] + sn * len * 0.5];
           const px = -sn * 0.55 * s, pz = c * 0.55 * s, k = frond[f % 3];
-          b.tri([p2[0], p2[1], p2[2]], [mid[0] + px, mid[1], mid[2] + pz], [mid[0] - px, mid[1], mid[2] - pz], k);
-          b.tri([mid[0] + px, mid[1], mid[2] + pz], tip, [mid[0] - px, mid[1], mid[2] - pz], k);
+          pbat.tri([p2[0], p2[1], p2[2]], [mid[0] + px, mid[1], mid[2] + pz], [mid[0] - px, mid[1], mid[2] - pz], k);
+          pbat.tri([mid[0] + px, mid[1], mid[2] + pz], tip, [mid[0] - px, mid[1], mid[2] - pz], k);
         }
-        b.blob(p2[0], p2[1] - 0.2, p2[2], 0.35 * s, 0.35 * s, 0.35 * s, col(0x6a4a2a), 0);
+        pbat.blob(p2[0], p2[1] - 0.2, p2[2], 0.35 * s, 0.35 * s, 0.35 * s, col(0x6a4a2a), 0);
       };
       sprinkle(190, 3000, (x, z) => {
         const h = terrH(x, z); nearSp(x, z);
@@ -962,16 +995,21 @@
         b.blob(cx, 1.5, cz, s * 0.7, 2.4 + s * 0.1, s * 0.6, col(0x4ab048), 1);
         for (let q = 0; q < 4; q++) palm(cx + (rng() - 0.5) * s * 0.6, 3.5, cz + (rng() - 0.5) * s * 0.5, 1.2 + rng() * 0.8, rng);
       }
-      // sailboats + buoys
-      for (let k = 0; k < 9; k++) {
-        const x = bbx0 - 250 + rng() * (bbx1 - bbx0 + 500), z = bbz0 - 250 + rng() * (bbz1 - bbz0 + 500);
-        if (terrH(x, z) > 0.05) continue;
-        const a = rng() * TAU, c0 = Math.cos(a), s0 = Math.sin(a);
-        b.box(x, 0, z, 2.2, 1.0, 7, -a + Math.PI / 2, col(0xf4efe0));
-        tube(b, [x, 0.9, z], [x, 9, z], 0.15, 0.1, 4, col(0x6a4a2a));
-        b.tri([x + c0 * 0.1, 8.6, z - s0 * 0.1], [x + c0 * 0.1, 1.6, z - s0 * 0.1], [x + s0 * 3.2, 1.6, z + c0 * 3.2], col(0xffffff));
-        b.tri([x, 8.6, z], [x, 1.6, z], [x - s0 * 2.4, 1.6, z - c0 * 2.4], [1, 0.45, 0.4]);
+      // sailboats bobbing on the swell
+      {
+        const hb = new kit.Batch(); hb.box(0, 0, 0, 2.2, 1.0, 7, 0, col(0xf4efe0)); tube(hb, [0, 0.9, 0], [0, 9, 0], 0.15, 0.1, 4, col(0x6a4a2a));
+        hb.tri([0.05, 8.6, 0], [0.05, 1.6, 0], [0.05, 1.6, 3.2], col(0xffffff)); hb.tri([-0.05, 8.6, 0], [-0.05, 1.6, 3.2], [-0.05, 1.6, 0], col(0xffffff));
+        hb.tri([0.05, 8.6, 0], [0.05, 1.6, -2.4], [0.05, 1.6, 0], [1, 0.45, 0.4]); hb.tri([-0.05, 8.6, 0], [-0.05, 1.6, 0], [-0.05, 1.6, -2.4], [1, 0.45, 0.4]);
+        const hg = kit.trackGeom(hb.build());
+        let placed = 0;
+        for (let k = 0; k < 40 && placed < 9; k++) {
+          const x = bbx0 - 250 + rng() * (bbx1 - bbx0 + 500), z = bbz0 - 250 + rng() * (bbz1 - bbz0 + 500);
+          if (terrH(x, z) > 0.05) continue;
+          const m = new T.Mesh(hg, kit.mat({})); m.position.set(x, 0.1, z); m.rotation.y = rng() * TAU; kit.add(m); kit.bob(m, 0.22, 1 + rng() * 0.4, rng() * 6, 0.05); placed++;
+        }
       }
+      kit.birds({ cx: (bbx0 + bbx1) / 2, cz: (bbz0 + bbz1) / 2, y: 40, radius: 200, count: 10, speed: 0.08, size: 1.4 });
+      kit.birds({ cx: bbx0 + 60, cz: bbz0 + 40, y: 28, radius: 90, count: 6, speed: -0.12 });
       // ---- serpent landmarks: eyes, brow, nostrils, forked tongue, dorsal spines
       {
         const i0 = Math.round(34 / 2);
@@ -1018,6 +1056,9 @@
         }
       }
       kit.mesh(b, {}, false);
+      { const pm = kit.mesh(pbat, { wind: { strength: 0.45, heightScale: 0.2 } }, false); void pm; }
+      for (const sd of [-1, 1]) kit.crowdStand({ d0: kit.length - 50, d1: kit.length + 70, side: sd, l0: edge + 2.6, rows: 2, gap: 1.3, rise: 0, step: 2.4, scale: 1.1, radius: 55, dy: -0.8 });
+      for (let d = 10; d < 160; d += 32) for (let sd = -1; sd <= 1; sd += 2) kit.flagAt(d, sd * (edge + 1), 2.6, 1.5, [[0xff6a5a, 0xfff6e0], [0x2c9ad6, 0xffffff]][((d / 32) | 0) & 1], { pole: 6.5 });
 
       // ---- hill tunnel
       {
@@ -1048,15 +1089,16 @@
           fb.blob(p[0], p[1] + hgt - 2.5, p[2], 5.5, 3, 5.5, col(0x3f9a46), 1);
         }
         const top = kit.at(dF, sd * (edge + 3.4), 18), base = kit.at(dF, sd * (edge + 3.4), 0.2);
-        for (let k = -2; k <= 2; k++) {
-          const a = kit.at(dF + k * 3.4, sd * (edge + 1.6), 17), c = kit.at(dF + k * 3.4, sd * (edge + 1.6), 0.4);
-          wb.box(a[0], c[1], a[2], 3.2, a[1] - c[1], 1.4, hy, k & 1 ? col(0xdff6ff) : col(0xbfeaff));
+        {   // flowing water sheet: scrolling texture panel down the cliff face
+          const fm = kit.flowMat('water', { speed: [0, 1.5], repeat: [2, 4], fallback: 0xbfeaff });
+          kit.panel([kit.at(dF - 8, sd * (edge + 1.6), 0.3), kit.at(dF + 8, sd * (edge + 1.6), 0.3), kit.at(dF + 8, sd * (edge + 1.6), 17.4), kit.at(dF - 8, sd * (edge + 1.6), 17.4)], fm, [1, 1]);
         }
         const pool = kit.at(dF, sd * (edge + 1), 0.3);
         wb.blob(pool[0], pool[1], pool[2], 9, 0.5, 9, col(0xcdf2ff), 1);
         for (let k = 0; k < 6; k++) wb.blob(pool[0] + (rng() - 0.5) * 7, pool[1] + 1 + rng() * 2, pool[2] + (rng() - 0.5) * 7, 1.8, 1.8, 1.8, [1, 1, 1], 0);
         kit.mesh(fb, {}, false);
         kit.mesh(wb, { transparent: true, opacity: 0.86 }, false);
+        kit.particles({ x: pool[0], y: pool[1] + 1.2, z: pool[2], count: 30, vel: [0, 2.4, 0], spread: [2.4, 1, 2.4], jitter: [3, 0.5, 3], life: 2.2, size: 3.2, grow: 1.6, alpha: 0.4, pow: 1.1, color: [0xffffff, 0xdff6ff] });   // spray + mist
         // cascade across the road: pale stripes (decal-like) flowing from the pool
         const sb = new kit.Batch();
         for (let k = 0; k < 6; k++) {
@@ -1183,19 +1225,19 @@
       kit.mesh(terr.mesh, {}, false);
       const th = terr.h;
 
-      const b = new kit.Batch();
+      const b = new kit.Batch(), jt = new kit.Batch();   // jt: jungle foliage (wind-swayed)
       // ---- jungle trees, ferns, rocks
       const trunk = col(0x6a4a2a), gr = [col(0x2f8f3a), col(0x3fa645), col(0x24762f)], vine = col(0x2a6a2a);
       const jtree = (x, y, z, s, r) => {
         const lean = (r() - 0.5) * 1.2, h = (7 + r() * 4) * s;
-        tube(b, [x, y - 1, z], [x + lean, y + h, z], 0.9 * s, 0.55 * s, 6, trunk);
+        tube(jt, [x, y - 1, z], [x + lean, y + h, z], 0.9 * s, 0.55 * s, 6, trunk);
         const c = gr[(r() * 3) | 0];
-        b.blob(x + lean, y + h + 1.5 * s, z, 5.6 * s, 3.4 * s, 5.6 * s, c, 0);
-        b.blob(x + lean + 2.8 * s, y + h - 0.4 * s, z + 1.4 * s, 4 * s, 2.6 * s, 4 * s, gr[(r() * 3) | 0], 0);
-        b.blob(x + lean - 2.4 * s, y + h - 0.6 * s, z - 1.8 * s, 3.8 * s, 2.4 * s, 3.8 * s, gr[(r() * 3) | 0], 0);
+        jt.blob(x + lean, y + h + 1.5 * s, z, 5.6 * s, 3.4 * s, 5.6 * s, c, 0);
+        jt.blob(x + lean + 2.8 * s, y + h - 0.4 * s, z + 1.4 * s, 4 * s, 2.6 * s, 4 * s, gr[(r() * 3) | 0], 0);
+        jt.blob(x + lean - 2.4 * s, y + h - 0.6 * s, z - 1.8 * s, 3.8 * s, 2.4 * s, 3.8 * s, gr[(r() * 3) | 0], 0);
         for (let k = 0; k < 2; k++) {
           const a = r() * TAU, vx = x + lean + Math.cos(a) * 3 * s, vz = z + Math.sin(a) * 3 * s;
-          tube(b, [vx, y + h - 0.6 * s, vz], [vx, y + h - (3 + r() * 3) * s, vz], 0.1 * s, 0.07 * s, 3, vine);
+          tube(jt, [vx, y + h - 0.6 * s, vz], [vx, y + h - (3 + r() * 3) * s, vz], 0.1 * s, 0.07 * s, 3, vine);
         }
       };
       kit.scatter(300, 2, 80, edge + 12, (x, z, i, r) => {
@@ -1206,7 +1248,7 @@
       kit.scatter(160, 1, 60, edge + 8, (x, z, i, r) => {
         const h = th(x, z); if (h < 0.5) return;
         const s = 0.8 + r() * 1.4;
-        for (let k = 0; k < 5; k++) { const a = (k / 5) * TAU + r(); b.tri([x, h + 0.2, z], [x + Math.cos(a) * 2.8 * s, h + 1.7 * s, z + Math.sin(a) * 2.8 * s], [x + Math.cos(a + 0.5) * 1.6 * s, h + 0.4 * s, z + Math.sin(a + 0.5) * 1.6 * s], gr[k % 3]); }
+        for (let k = 0; k < 5; k++) { const a = (k / 5) * TAU + r(); jt.tri([x, h + 0.2, z], [x + Math.cos(a) * 2.8 * s, h + 1.7 * s, z + Math.sin(a) * 2.8 * s], [x + Math.cos(a + 0.5) * 1.6 * s, h + 0.4 * s, z + Math.sin(a + 0.5) * 1.6 * s], gr[k % 3]); }
       });
       kit.scatter(150, 2, 90, edge + 8, (x, z, i, r) => {
         const h = th(x, z); if (h < 0.5) return;
@@ -1230,7 +1272,10 @@
           const top = [vx + Math.cos(a) * r0, y - 2, vz + Math.sin(a) * r0], bot = [vx + Math.cos(a) * (r0 + 60 + rng() * 60), y - 150 + rng() * 40, vz + Math.sin(a) * (r0 + 60 + rng() * 60)];
           tube(lb, top, bot, 2.2, 3.4, 4, k & 1 ? col(0xff5a1a) : col(0xffa31a));
         }
-        kit.mesh(lb, {}, true);
+        { const lm = kit.mesh(lb, {}, true); if (lm) kit.blinker(lm.material, 2.6, { mode: 'sine', lo: 0.7 }); }
+        // smoke plume drifting off the crater + lava embers leaping out of it
+        kit.particles({ x: vx, y: y + 2, z: vz, count: 44, vel: [6, 14, 2], spread: [3, 3, 3], jitter: [8, 1, 8], life: 11, size: 26, grow: 2.4, alpha: 0.5, pow: 0.9, wob: 6, color: [0x5a5560, 0x7a747c, 0x3a3640] });
+        kit.particles({ x: vx, y: y - 2, z: vz, count: 26, vel: [0, 30, 0], spread: [10, 9, 10], jitter: [8, 0, 8], life: 3.2, grav: -14, size: 5.5, grow: -0.4, alpha: 1, pow: 0.7, color: [0xff7a1a, 0xffc040, 0xff4a10], additive: true });
         for (let k = 0; k < 9; k++) b.blob(vx + (rng() - 0.5) * 30 + k * 6, y + 14 + k * 11, vz + (rng() - 0.5) * 30, 14 + k * 1.6, 9 + k, 14 + k * 1.6, kit.mix(col(0x6a6a72), col(0xb8b8c0), k / 9), 0);
       }
       // far hills
@@ -1250,6 +1295,7 @@
       rockWall(8, P.dCan - 6); rockWall(P.dCan + P.canLen + 6, P.dCan + P.canLen + 30);
       rockWall(P.dTo + 6, dBr0 + 6); rockWall(dBr1 - 6, L - 8);
 
+      const torches = [];
       // ---- climb: rope causeway (posts, ropes, torches) — the kart flies over it
       {
         const rope = col(0xcdb27a);
@@ -1259,7 +1305,7 @@
           tube(b, p, q, 0.28, 0.22, 5, trunk);
           const n = kit.at(d + 9, l, 3.0);
           tube(b, q, n, 0.07, 0.07, 3, rope);
-          if (((d / 9) | 0) % 3 === 0) { b.blob(q[0], q[1] + 0.6, q[2], 0.45, 0.6, 0.45, col(0xff9a1a), 0); }
+          if (((d / 9) | 0) % 3 === 0) { b.blob(q[0], q[1] + 0.6, q[2], 0.45, 0.6, 0.45, col(0xff9a1a), 0); torches.push([q[0], q[1] + 1.0, q[2]]); }
         }
       }
       // trestle legs holding the causeway up
@@ -1284,6 +1330,7 @@
           const p = kit.at(P.dTo + 10, sd * (edge + 3), 0);
           b.box(p[0], p[1] - 1, p[2], 4, 13, 4, hy, stone); b.box(p[0], p[1] + 11, p[2], 5, 1.6, 5, hy, st2);
           b.blob(p[0], p[1] + 13.5, p[2], 1.2, 1.8, 1.2, col(0xff7a1a), 0);
+          torches.push([p[0], p[1] + 14.2, p[2]]);
         }
         const c = kit.at(P.dTo + 10, 0, 12.4);
         b.box(c[0], c[1], c[2], 2 * (edge + 3) + 5, 2.2, 3.4, hy, stone);
@@ -1306,6 +1353,11 @@
         b.box(p[0], p[1] + 10.4, p[2], 3.6, 0.8, 3.6, hy, col(0x6a4a2a));
       }
       kit.mesh(b, {}, false);
+      kit.foliage(jt, { strength: 0.4, heightScale: 0.14 });
+      if (torches.length) kit.particles({ emitters: torches, count: 9, vel: [0, 1.8, 0], spread: [0.25, 0.5, 0.25], life: 0.8, size: 1.0, grow: -0.5, alpha: 0.95, color: [0xffa030, 0xffd060, 0xff6a20], additive: true });
+      for (const sd of [-1, 1]) kit.crowdStand({ d0: L - 40, d1: L + 55, side: sd, l0: edge + 8, rows: 2, gap: 1.3, rise: 0, step: 2.6, scale: 1.1, radius: 50, dy: 0, colors: [0xd24a3a, 0xf0c030, 0x2f8fd0, 0x2fa04a, 0xffffff] });
+      kit.birds({ cx: 180, cz: 200, y: 62, radius: 150, count: 6, speed: 0.1, body: 0xd8383d, wing: 0x2f9a3a });
+      for (const dd of [-18, 22]) for (const sd of [-1, 1]) { const d = (dd + L) % L, p = kit.at(d, sd * (edge + 4.5), 10.8), f = kit.frame(d); kit.flag(p[0], p[1], p[2], 3.6, 2, Math.atan2(f.tx, f.tz) - Math.PI / 2, [[0xd24a3a, 0xf0c030], [0x2f8fd0, 0xffffff]][(sd + 1) / 2], { pole: 2.6 }); }
 
       // ---- giant barrel cannon
       {
@@ -1346,8 +1398,9 @@
         }
         // hanging plank undersides (reads as a sagging deck)
         for (let d = dA; d < dB; d += 3) { const a = kit.at(d, -6.6, -0.35), c = kit.at(d + 3, -6.6, -0.35), a2 = kit.at(d, 6.6, -0.35), c2 = kit.at(d + 3, 6.6, -0.35); bb.quad(a, c, c2, a2, ((d / 3) | 0) & 1 ? col(0x6a4426) : col(0x58381e)); }
-        kit.mesh(bb, {}, false);
+        kit.mesh(bb, { wind: { strength: 0.2, heightScale: 0.5, groundY: P.H, speed: 1.1 } }, false);   // ropes & posts sway over the ravine
         const mf = kit.frame((dBr0 + dBr1) / 2);
+        kit.particles({ x: mf.x, y: 6, z: mf.z, count: 28, vel: [1.4, 0.15, 0.6], spread: [0.4, 0.1, 0.4], jitter: [45, 2.5, 50], life: 16, size: 24, grow: 0.8, alpha: 0.22, pow: 0.8, fadeIn: 0.3, color: [0xffffff, 0xdfeaf4] });
         const mg = kit.trackGeom(new T.PlaneGeometry(110, 150)); mg.rotateX(-Math.PI / 2);
         const mm = new T.Mesh(mg, kit.trackMat(new T.MeshBasicMaterial({ color: 0xc8d6e0, transparent: true, opacity: 0.45, depthWrite: false })));
         mm.position.set(mf.x, 3.4, mf.z); kit.add(mm);

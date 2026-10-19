@@ -305,6 +305,7 @@
   const BY_THEME = { meadow: 'meadow', dunes: 'desert', glacier: 'snow', starlight: 'rainbow' };
   const BY_SKY = { day: 'meadow', sunset: 'sunset', night: 'city', space: 'rainbow', indoor: 'dust' };
   const AMB_CAP = { A: 140, B: 100, C: 70, D: 30, E: 16 };
+  const AMB_SIZE = { A: 3.0, B: 2.4, D: 2.0, E: 1.4 };   // ambient size multipliers (read clearly from ~8 m behind a kart)
 
   function pickProfile(track) {
     const id = track && ((track.def && track.def.id) || track.id);
@@ -370,7 +371,9 @@
       let n = Math.round(L[1] * s.qf); n = Math.min(n, AMB_CAP[L[0]] - used[L[0]]);
       for (let j = 0; j < n; j++) {
         const i = used[L[0]]++;
-        const kind = L[14] || 1; const size = R(L[5], L[6]) * (kind === 1 || kind === 2 || kind === 6 || kind === 7 ? 1 : 3.4);
+        const kind = L[14] || 1; let size = R(L[5], L[6]) * (kind === 1 || kind === 2 || kind === 6 || kind === 7 ? 1 : 3.4);
+        // sprites were reported tiny in the chase camera: pool-specific boost (mote/spark/leaf/critter sizes)
+        size *= (kind === 1 && L[0] !== 'C') ? (AMB_SIZE[L[0]] || 1) : (L[0] === 'E' && kind !== 7 ? AMB_SIZE.E : 1);
         const shape = L[15] || 0;
         const hex = L[7][(rnd() * L[7].length) | 0];
         let w = size, h = size;
@@ -522,6 +525,31 @@
       S.dr.hold = 12;
     } catch (e) { /* ignore */ }
   };
+  // celebratory burst when a human kart takes the lead (position becomes 1)
+  Ambience.leadChange = function (kart) {
+    if (!S || !isHuman(kart) || !kart.pos) return;
+    try {
+      const p = kart.pos, y = (kart.y !== undefined ? kart.y : p.y) + 1.4, B = S.pools.B;
+      burstConfetti(p.x, y, p.z, 30, 9, 5);
+      for (let i = 0; i < 22; i++) {   // gold sparkle ring
+        const a = (i / 22) * TAU + rnd() * 0.2, sp = R(5, 8);
+        const k = B.emit(p.x, y, p.z, Math.cos(a) * sp, R(2, 5), Math.sin(a) * sp, R(0.7, 1.1), [0xffe46b, 0xffffff, 0xffc030][i % 3], 1, R(0.5, 0.8), R(0.5, 0.8));
+        B.grav[k] = -9; B.drag[k] = 1.6; B.grow[k] = -0.55;
+      }
+    } catch (e) { /* ignore */ }
+  };
+  function stepLead(dt) {
+    const hs = G.Game && G.Game.humans;
+    if (!hs) return;
+    const st = S.lead || (S.lead = []);
+    for (let i = 0; i < hs.length; i++) {
+      const k = hs[i] && hs[i].kart; if (!k) continue;
+      const pos = k.position | 0, e = st[i] || (st[i] = { prev: pos, cd: 0 });
+      if (e.cd > 0) e.cd -= dt;
+      if (pos === 1 && e.prev > 1 && e.cd <= 0 && G.Game.state === 'race' && !k.finished) { Ambience.leadChange(k); e.cd = 5; }
+      e.prev = pos;
+    }
+  }
   function groundAt(x, z, fb) {
     try {
       const q = S.track.query(x, z, -1, S.camY);
@@ -748,6 +776,7 @@
       const P = S.pools, cx = S.camX, cy = S.camY, cz = S.camZ;
       updateDrone(dt);
       stepSched(dt);
+      stepLead(dt);
       // theme extras
       if (S.profile === 'colosseum') {
         S.confNext -= dt;

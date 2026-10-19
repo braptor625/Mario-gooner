@@ -51,13 +51,13 @@
     (holes || []).forEach((h) => sh.holes.push(new THREE.Path(h.map(V))));
     const g = new THREE.ShapeGeometry(sh); g.rotateX(-PI / 2);
     kit.trackGeom(g);
-    const m = kit.trackMat(new THREE.MeshPhongMaterial({ color, shininess: 80, specular: 0xaaccee, transparent: opacity < 1, opacity: opacity, side: THREE.DoubleSide }));
+    const m = kit.waterMat({ color, opacity });
     const mesh = new THREE.Mesh(g, m); mesh.position.y = y;
     kit.add(mesh); return mesh;
   }
   function discMesh(kit, x, z, r, y, color, opacity) {
     const g = new THREE.CircleGeometry(r, 40); g.rotateX(-PI / 2); kit.trackGeom(g);
-    const m = kit.trackMat(new THREE.MeshPhongMaterial({ color, shininess: 90, specular: 0xffffff, transparent: true, opacity: opacity || 0.9 }));
+    const m = kit.waterMat({ color, opacity: opacity || 0.9 });
     const mesh = new THREE.Mesh(g, m); mesh.position.set(x, y, z); kit.add(mesh); return mesh;
   }
   // unparented mesh from a batch (for hazards)
@@ -283,7 +283,7 @@
   const inBay = (x, z) => (x > 225 && x < 540 && z < 125 && z > -1500) || (x >= 540 && z < -60) || (z < -130);
   function bbDecorate(track, kit) {
     const c = kit.col, rng = kit.rng, L = kit.length, ds = kit.ds, N = kit.N, gy = kit.groundY;
-    const b = new kit.Batch(), lamps = new kit.Batch();
+    const b = new kit.Batch(), lamps = new kit.Batch(), fb = new kit.Batch(), bec = new kit.Batch();
     const hwT = 12 + 5;                                   // road half width + shoulder
     // ---- sea
     const sea = waterPoly(kit, BB_BAY, null, gy + 0.25, 0x1f7fc0, 0.93);
@@ -341,7 +341,8 @@
         b.box(p[0], p[1], p[2], 2 * (hwT + 2.4) + 3, 2.6, 3.4, hd, steel2);
       }
       const q = kit.at(dT, 0, towerTop + 1.2);
-      lamps.box(q[0] - 1, q[1], q[2] - 1, 2, 2, 2, 0, c(0xff5040));
+      bec.box(q[0] - 1, q[1], q[2] - 1, 2, 2, 2, 0, c(0xff5040));
+      for (let s = -1; s <= 1; s += 2) { const tp = kit.at(dT, s * (hwT + 2.4), towerTop + 1.6); kit.flag(tp[0], tp[1], tp[2], 7, 3.6, Math.atan2(f.tx, f.tz) - Math.PI / 2, s < 0 ? [0xd9482b, 0xf6f2ea] : [0x2f78d0, 0xf6f2ea], { pole: 6 }); }
       // pier base
       b.box(f.x, base, f.z, 2 * hwT + 7, 5.5, 9, hd, concrete);
     });
@@ -411,11 +412,11 @@
     }
     kit.scatter(150, 4, 90, 30, (x, z, i, r) => {
       if (inBay(x, z) || (x > 200 && x < 560 && z > 100 && z < 160)) return;
-      if (x > 215 && x < 560 && z > 85) { tree(b, c, x, gy, z, 0.9 + r() * 0.8, r, 'round'); return; }
+      if (x > 215 && x < 560 && z > 85) { tree(fb, c, x, gy, z, 0.9 + r() * 0.8, r, 'round'); return; }
       const h = 10 + r() * 38, w = 11 + r() * 10, d = 11 + r() * 10;
       building(kit, b, x, gy, z, w, h, d, r() * 6.28, c(bodyC[(r() * bodyC.length) | 0]), roofC, r() < 0.5 ? glassC : glassD);
     });
-    kit.scatter(90, 2, 60, 24, (x, z, i, r) => { if (!inBay(x, z)) tree(b, c, x, gy, z, 0.8 + r() * 0.7, r, r() < 0.3 ? 'pine' : 'round'); });
+    kit.scatter(90, 2, 60, 24, (x, z, i, r) => { if (!inBay(x, z)) tree(fb, c, x, gy, z, 0.8 + r() * 0.7, r, r() < 0.3 ? 'pine' : 'round'); });
     // cargo cranes + containers on the west quay
     for (let k = 0; k < 2; k++) {
       const z = -75 + k * 120, x = 205;
@@ -429,6 +430,7 @@
       for (let k = 0; k < 5; k++) b.frustum(x, gy + 3 + k * 6, z, 4.2 - k * 0.35, 3.85 - k * 0.35, 6, 10, k & 1 ? c(0xd9482b) : c(0xf6f2ea), 0);
       b.frustum(x, gy + 33, z, 4.6, 4.6, 0.8, 10, c(0x333a42), 0); lamps.blob(x, gy + 35.5, z, 2.2, 2.2, 2.2, c(0xffe58a), 1);
       b.frustum(x, gy + 36.6, z, 3.3, 0, 3, 10, c(0xd9482b), 0);
+      kit.lightBeam({ x, y: gy + 35.5, z, len: 130, width: 9, speed: 0.6, tilt: 0.04, count: 2, color: 0xfff0b0 });
     }
     // sailboats
     for (let k = 0; k < 9; k++) {
@@ -447,13 +449,21 @@
       bb.box(0, 0, 0, 9, 3, 26, 0, c(0xf4f0e6)); bb.box(0, 3, -2, 8, 3, 16, 0, c(0x2f78d0)); bb.box(0, 3.1, 0, 8.2, 1.2, 12, 0, c(0xcfe6f7)); bb.box(0, 6, 0, 7, 2.2, 8, 0, c(0xf4f0e6));
       bb.frustum(0, 8.2, -3, 1.6, 1.4, 3.2, 8, c(0xd9482b), 0);
       const m = mk(kit, bb); m.position.set(420, gy + 0.2, 100); m.rotation.y = 0.1; kit.add(m);
+      kit.bob(m, 0.1, 0.8, 0.5, 0.012);
+      kit.particles({ x: 420, y: gy + 12.6, z: 97, count: 18, vel: [1.2, 3.2, 0.2], spread: [0.4, 0.6, 0.4], life: 4, size: 2.6, grow: 2.5, alpha: 0.55, pow: 1.2, wob: 0.8, color: [0xe8e8ee, 0xd0d0d8] });   // funnel smoke
     }
     // far hills and sun glow on the horizon
     kit.farScatter(16, 160, (x, z, r) => {
       if (inBay(x, z) && z > -600) return;
       const s = 30 + r() * 40; b.blob(x, gy - 4, z, s * 1.5, s * 0.6, s, c(0x6fae6a), 1);
     });
-    kit.mesh(b); kit.mesh(lamps, {}, true);
+    kit.mesh(b); kit.mesh(lamps, {}, true); kit.foliage(fb);
+    { const bm = kit.mesh(bec, {}, true); if (bm) kit.blinker(bm.material, 1.5, { duty: 0.3, lo: 0.08 }); }   // tower warning lights
+    kit.crowdStand({ d0: L - 60, d1: L + 80, side: -1, l0: hwT + 3, rows: 2, gap: 1.3, rise: 0, step: 2.2, radius: 55 });
+    kit.crowdStand({ d0: L - 60, d1: L + 80, side: 1, l0: hwT + 3, rows: 2, gap: 1.3, rise: 0, step: 2.2, radius: 55 });
+    kit.birds({ cx: 400, cz: -120, y: 42, radius: 140, count: 9, speed: 0.1, size: 1.3 });
+    kit.birds({ cx: 330, cz: -260, y: 30, radius: 80, count: 6, speed: -0.14 });
+    kit.grassTufts(220, 0.4, 14, { flowers: 0.25 });
     // sea tweaks go in def.update
   }
   function bbHazards(track, kit) {
@@ -482,9 +492,9 @@
     for (let k = 0; k < 8; k++) { const a = (k / 8) * PI * 2; b.box(x + Math.cos(a) * r * 1.1, y0 + h + 1, z + Math.sin(a) * r * 1.1, 1.2, 1.0, 1.2, 0, stoneC); }
     b.frustum(x, y0 + h + 1.0, z, r * 1.15, 0, roofH, 14, roofC, 0);
     b.box(x - 0.1, y0 + h + 1 + roofH, z - 0.1, 0.2, 3.2, 0.2, 0, c(0xe8e0d0));
-    b.tri([x + 0.1, y0 + h + roofH + 4, z], [x + 2.6, y0 + h + roofH + 3.5, z], [x + 0.1, y0 + h + roofH + 3, z], c(0xf2c230));
-    b.tri([x + 0.1, y0 + h + roofH + 3, z], [x + 2.6, y0 + h + roofH + 3.5, z], [x + 0.1, y0 + h + roofH + 4, z], c(0xf2c230));
+    roundTower.flags.push([x, y0 + h + 1 + roofH + 3.4, z, roofC]);   // waving pennant added by the course (kit.flag)
   }
+  roundTower.flags = [];
   function crenel(kit, b, d0, d1, l, y, h, stoneC, step) {
     for (let d = d0; d < d1; d += step) {
       const p = kit.at(d, l, y), f = kit.frame(d);
@@ -493,7 +503,8 @@
   }
   function ccDecorate(track, kit) {
     const c = kit.col, rng = kit.rng, L = kit.length, ds = kit.ds, gy = kit.groundY;
-    const b = new kit.Batch(), lamps = new kit.Batch();
+    const b = new kit.Batch(), lamps = new kit.Batch(), fb = new kit.Batch();
+    roundTower.flags.length = 0;
     const stone = c(0xd3cab6), stone2 = c(0xb7ad98), dark = c(0x8a8070), red = c(0xb23a3e), blue = c(0x3a58b0), gold = c(0xe8b830);
     const hwT = 17;
     const G0 = 92, G1 = 226, WL = 40;               // courtyard: gatehouse distances, wall lateral
@@ -552,8 +563,7 @@
       // main flag
       const fp = [keep[0], keep[1] + 72, keep[2]];
       rod(b, fp, [fp[0], fp[1] + 9, fp[2]], 0.18, c(0xe8e0d0));
-      b.tri([fp[0], fp[1] + 9, fp[2]], [fp[0] + f.tx * 8, fp[1] + 7, fp[2] + f.tz * 8], [fp[0], fp[1] + 5, fp[2]], gold);
-      b.tri([fp[0], fp[1] + 5, fp[2]], [fp[0] + f.tx * 8, fp[1] + 7, fp[2] + f.tz * 8], [fp[0], fp[1] + 9, fp[2]], gold);
+      kit.flag(fp[0], fp[1] + 9, fp[2], 10, 4.4, hd - PI / 2, [0xe8b830, 0xb23a3e], { pole: 0.01, pattern: 'stripes' });
     }
     // courtyard: flower beds, trees, banners, fountain
     const beds = [c(0xff5a6a), c(0xffe14a), c(0xff9ae0), c(0xffffff)];
@@ -561,20 +571,18 @@
       const p = kit.at(d + (s > 0 ? 7 : 0), s * (hwT + 9), 0);
       b.box(p[0], p[1], p[2], 7, 0.6, 3.2, Math.atan2(kit.frame(d).tx, kit.frame(d).tz), c(0x4f9a3a));
       for (let k = 0; k < 6; k++) b.blob(p[0] + (rng() - 0.5) * 5, p[1] + 0.9, p[2] + (rng() - 0.5) * 2, 0.5, 0.4, 0.5, beds[(rng() * 4) | 0], 0);
-      if (((d / 14) | 0) % 3 === 0) { const q = kit.at(d, s * (hwT + 17), 0); tree(b, c, q[0], q[1], q[2], 1.2, rng, 'round'); }
+      if (((d / 14) | 0) % 3 === 0) { const q = kit.at(d, s * (hwT + 17), 0); tree(fb, c, q[0], q[1], q[2], 1.2, rng, 'round'); }
     }
     {
       const p = kit.at((G0 + G1) / 2 + 22, hwT + 17, 0);
       b.frustum(p[0], p[1], p[2], 6, 6, 1.0, 14, stone, 0); b.frustum(p[0], p[1] + 1.0, p[2], 4, 3.4, 0.6, 14, c(0x3aa7e0), 0);
       b.frustum(p[0], p[1], p[2], 1.2, 0.9, 5, 8, stone2, 0); b.blob(p[0], p[1] + 5.6, p[2], 2.2, 0.6, 2.2, c(0x7ccdf0), 0);
+      kit.particles({ x: p[0], y: p[1] + 5.8, z: p[2], count: 40, vel: [0, 8, 0], spread: [1.7, 2, 1.7], life: 1.4, grav: -14, size: 0.5, alpha: 0.9, pow: 0.5, color: [0xcdf4ff, 0xffffff, 0x9fe6ff] });
     }
     for (let d = 30; d < L - 30; d += 52) {
       if (d > G0 - 12 && d < G1 + 12) continue;
-      const s = ((d / 52) | 0) & 1 ? 1 : -1, p = kit.at(d, s * (hwT + 0.8), 0), f = kit.frame(d);
-      rod(b, [p[0], p[1], p[2]], [p[0], p[1] + 7, p[2]], 0.14, c(0xe8e0d0));
-      const col2 = (d / 52 | 0) % 2 ? red : blue;
-      b.tri([p[0], p[1] + 7, p[2]], [p[0] + f.tx * 3.2, p[1] + 6.2, p[2] + f.tz * 3.2], [p[0], p[1] + 5.4, p[2]], col2);
-      b.tri([p[0], p[1] + 5.4, p[2]], [p[0] + f.tx * 3.2, p[1] + 6.2, p[2] + f.tz * 3.2], [p[0], p[1] + 7, p[2]], col2);
+      const s = ((d / 52) | 0) & 1 ? 1 : -1;
+      kit.flagAt(d, s * (hwT + 0.8), 3.4, 1.8, (d / 52 | 0) % 2 ? [0xb23a3e, 0xe8b830] : [0x3a58b0, 0xffffff], { pole: 7 });
     }
 
     // --- tunnel under a grassy ruin hill + dash panels before it
@@ -606,18 +614,34 @@
         if (rng() < 0.5) b.frustum(spot.x + Math.cos(an) * (rr - 1), gy, spot.z + Math.sin(an) * (rr - 1), 0.25, 0, 2.2, 4, c(0x3f8f3a), 0);
       }
       // little rowing boats
-      for (let k = 0; k < 2; k++) { const an = k * 2.6 + 0.8; b.box(spot.x + Math.cos(an) * R * 0.62, gy + 0.2, spot.z + Math.sin(an) * R * 0.62, 1.6, 0.7, 4, an, c(0x8a5a2b)); }
+      const rbt = new kit.Batch(); rbt.box(0, 0, 0, 1.6, 0.7, 4, 0, c(0x8a5a2b)); rbt.box(0, 0.5, 0, 1.2, 0.15, 3.2, 0, c(0xd9a066));
+      const rbg = kit.trackGeom(rbt.build());
+      for (let k = 0; k < 2; k++) { const an = k * 2.6 + 0.8, m = new THREE.Mesh(rbg, kit.mat({})); m.position.set(spot.x + Math.cos(an) * R * 0.62, gy + 0.2, spot.z + Math.sin(an) * R * 0.62); m.rotation.y = an; kit.add(m); kit.bob(m, 0.08, 1.2, k * 2, 0.05); }
+      // windmill on the shore
+      const wxm = spot.x + R + 12, wzm = spot.z;
+      if (kit.clear(wxm, wzm, 6)) {
+        b.frustum(wxm, gy, wzm, 3.6, 2.4, 11, 8, c(0xe9dcc0), 0); b.frustum(wxm, gy + 11, wzm, 3.2, 0, 3.4, 8, red, 0);
+        const bl = new kit.Batch();
+        for (let k = 0; k < 4; k++) { const a = (k / 4) * PI * 2; bl.quad([0, 0, 0], [Math.cos(a) * 9 - Math.sin(a) * 0.9, Math.sin(a) * 9 + Math.cos(a) * 0.9, 0], [Math.cos(a) * 9 + Math.sin(a) * 0.9, Math.sin(a) * 9 - Math.cos(a) * 0.9, 0], [Math.cos(a) * 1.2, Math.sin(a) * 1.2, 0], k & 1 ? c(0xf6f2ea) : c(0xe0483c)); bl.quad([Math.cos(a) * 3, Math.sin(a) * 3, 0.05], [Math.cos(a) * 9 - Math.sin(a) * 2.2, Math.sin(a) * 9 + Math.cos(a) * 2.2, 0.05], [Math.cos(a) * 9 - Math.sin(a) * 0.9, Math.sin(a) * 9 + Math.cos(a) * 0.9, 0.05], [Math.cos(a) * 3 - Math.sin(a) * 0.3, Math.sin(a) * 3 + Math.cos(a) * 0.3, 0.05], c(0xf6f2ea)); }
+        bl.blob(0, 0, 0.3, 0.9, 0.9, 0.9, c(0x6a4a2a), 0);
+        kit.spinBatch(bl, { x: wxm - 3.6, y: gy + 10, z: wzm, ry: -PI / 2, axis: 'z', speed: 0.9 });
+      }
     }
 
     // --- scenery
     const m0 = 32;
-    kit.scatter(240, 2, 80, m0, (x, z, i, r) => tree(b, c, x, gy, z, 0.9 + r() * 0.9, r, r() < 0.35 ? 'pine' : 'round'));
+    kit.scatter(240, 2, 80, m0, (x, z, i, r) => tree(fb, c, x, gy, z, 0.9 + r() * 0.9, r, r() < 0.35 ? 'pine' : 'round'));
     kit.scatter(120, 1, 50, m0 - 4, (x, z, i, r) => b.blob(x, gy + 0.5, z, 1.2 + r(), 0.9 + r() * 0.5, 1.2 + r(), c(0x3f9f45), 0));
-    const fl = [c(0xff5a6a), c(0xffe14a), c(0xffffff), c(0xff9ae0)];
-    kit.scatter(220, 1, 50, m0 - 3, (x, z, i, r) => b.box(x, gy, z, 0.35, 0.5 + r() * 0.3, 0.35, r() * 3, fl[(r() * 4) | 0]));
+    kit.grassTufts(600, 0.4, 24, { flowers: 0.4, scale: [0.9, 1.7] });
     kit.scatter(18, 6, 50, m0, (x, z, i, r) => { const s = 1 + r() * 0.8; b.frustum(x, gy, z, 0.6 * s, 0.5 * s, 1.6 * s, 6, c(0xf2ecd8), 0); b.blob(x, gy + 1.6 * s, z, 1.9 * s, 1.1 * s, 1.9 * s, c(0xe0483c), 1); b.blob(x - 0.7 * s, gy + 2.2 * s, z + 0.5 * s, 0.4, 0.2, 0.4, c(0xffffff), 0); });
     kit.farScatter(26, 100, (x, z, r) => { const s = 25 + r() * 35; b.blob(x, gy - 4, z, s * 1.3, s * 0.55, s, mix3(c(0x69b848), c(0x4f9a3a), r()), 1); });
-    kit.mesh(b); kit.mesh(lamps, {}, true);
+    kit.mesh(b); kit.mesh(lamps, {}, true); kit.foliage(fb);
+    // waving pennants on every tower, torches at the gatehouses, cheering courtyard crowd, birds
+    roundTower.flags.forEach((t, i) => kit.flag(t[0], t[1], t[2], 3.2, 1.7, (i * 1.9) % 6.28, i & 1 ? [0xf2c230, 0xb23a3e] : [0x3a58b0, 0xf2c230], { pole: 0.01 }));
+    [G0, G1].forEach((dg) => { const em = []; for (let s = -1; s <= 1; s += 2) for (let k = 0; k < 2; k++) { const q = kit.at(dg + (k ? 4 : -4), s * (hwT - 1.2), 4.4); em.push([q[0], q[1], q[2]]); } kit.particles({ emitters: em, count: 9, vel: [0, 1.8, 0], spread: [0.25, 0.5, 0.25], life: 0.8, size: 0.9, grow: -0.5, alpha: 0.95, color: [0xffa030, 0xffd060, 0xff6a20], additive: true }); });
+    kit.crowdStand({ d0: G0 + 8, d1: G1 - 8, side: -1, l0: hwT + 2.8, rows: 2, gap: 1.3, rise: 0, step: 2.3, radius: 60 });
+    kit.crowdStand({ d0: G0 + 8, d1: G1 - 8, side: 1, l0: hwT + 2.8, rows: 2, gap: 1.3, rise: 0, step: 2.3, radius: 60 });
+    kit.birds({ cx: 150, cz: 140, y: 52, radius: 120, count: 7, speed: 0.1 });
   }
   const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
@@ -692,7 +716,7 @@
     // ---- ocean
     {
       const g = new THREE.PlaneGeometry(9000, 9000, 1, 1); g.rotateX(-PI / 2); kit.trackGeom(g);
-      const m = kit.trackMat(new THREE.MeshPhongMaterial({ color: 0x14609e, shininess: 40, specular: 0x99ccee, transparent: true, opacity: 0.96 }));
+      const m = kit.waterMat({ color: 0x2a8ad0, deep: 0x0a4a88, opacity: 0.96 });
       const sea = new THREE.Mesh(g, m); sea.position.set(200, SEA, 0); sea.frustumCulled = false; kit.add(sea); track._fl.sea = sea;
     }
     // ---- ranges
@@ -775,8 +799,7 @@
     {
       const tip = H[7];
       rod(b, [tip[0] - 10, DECK, tip[1]], [tip[0] - 10, DECK + 18, tip[1]], 0.25, W);
-      b.tri([tip[0] - 10, DECK + 18, tip[1]], [tip[0] - 10, DECK + 14.5, tip[1] + 6], [tip[0] - 10, DECK + 14.5, tip[1]], c(0xf2c230));
-      b.tri([tip[0] - 10, DECK + 14.5, tip[1]], [tip[0] - 10, DECK + 14.5, tip[1] + 6], [tip[0] - 10, DECK + 18, tip[1]], c(0xf2c230));
+      kit.flag(tip[0] - 10, DECK + 18, tip[1], 9, 4.2, 0, [0xf2c230, 0xd9482b], { pole: 0.01 });
       b.box(tip[0] - 40, DECK, tip[1] - 3, 8, 1.6, 6, 0, c(0x4a5560)); b.box(tip[0] - 40, DECK + 1.6, tip[1] - 3, 3.6, 1.2, 3.6, 0, c(0x6a7582));
     }
     // ---- superstructure: stern cabin tower, bow bridge-house, funnels
@@ -849,11 +872,31 @@
     // gulls over the sea are left to the sky; sun deck flags
     for (let x = 0; x < 420; x += 70) for (let s = -1; s <= 1; s += 2) {
       const p = [x, DECK, s * 112];
-      rod(b, p, [p[0], p[1] + 9, p[2]], 0.12, W);
-      const fc = ((x / 70) | 0) & 1 ? c(0xd9482b) : c(0x2f78d0);
-      b.tri([p[0], p[1] + 9, p[2]], [p[0] + 3.4, p[1] + 8, p[2]], [p[0], p[1] + 7, p[2]], fc); b.tri([p[0], p[1] + 7, p[2]], [p[0] + 3.4, p[1] + 8, p[2]], [p[0], p[1] + 9, p[2]], fc);
+      kit.flag(p[0], p[1], p[2], 3.6, 2, 0, ((x / 70) | 0) & 1 ? [0xd9482b, 0xffffff] : [0x2f78d0, 0xffffff], { pole: 9 });
     }
-    kit.mesh(b); kit.mesh(lamps, {}, true);
+    // bunting along the pool deck
+    for (let s = -1; s <= 1; s += 2) for (let x = 0; x < 350; x += 70) kit.bunting([x, DECK + 8.8, s * 112], [x + 70, DECK + 8.8, s * 112], [0xd9482b, 0xf4f0e6, 0x2f78d0, 0xf2c230], 12, 1.0, 1.4);
+    { const lm = kit.mesh(lamps, {}, true); if (lm) kit.blinker(lm.material, 3.4, { mode: 'sine', lo: 0.72 }); }   // chandeliers shimmer
+    kit.mesh(b);
+    // sea life + sky: far ship sliding along the horizon, sailboats bobbing, gulls, fireworks at sunset
+    {
+      const sh = new kit.Batch();
+      sh.box(0, 0, 0, 14, 5, 70, 0, c(0xf4f0e6)); sh.box(0, 5, -6, 11, 4, 36, 0, c(0x2f6fb0)); sh.box(0, 9, -6, 9, 3, 20, 0, c(0xf4f0e6));
+      sh.frustum(0, 12, -10, 2.2, 2, 6, 10, c(0xd9482b), 0);
+      const far = kit.mesh(sh); far.position.set(-300, SEA + 0.5, 520); far.rotation.y = PI / 2; far.frustumCulled = false;
+      kit.slide(far, 380, 0, 0, 0.012, 0);
+      kit.bob(far, 0.25, 0.7, 1, 0.01);
+      const hb = new kit.Batch(); hb.box(0, 0, 0, 2.4, 1.0, 8, 0, c(0xf2f2f2)); hb.box(0, 0.5, 0.4, 0.2, 9, 0.2, 0, c(0xdddddd));
+      hb.tri([0, 1.5, 0.5], [0, 9, 0.3], [0, 1.5, -3.4], c(0xffffff)); hb.tri([0, 1.5, 0.5], [0, 1.5, -3.4], [0, 9, 0.3], c(0xffffff));
+      const hg = kit.trackGeom(hb.build());
+      for (let k = 0; k < 7; k++) { const m = new THREE.Mesh(hg, kit.mat({})), a = k * 0.9 + 0.3, r = 280 + (k % 3) * 70; m.position.set(200 + Math.cos(a) * r, SEA + 0.3, Math.sin(a) * r * 0.8); m.rotation.y = a * 2; m.scale.setScalar(1.6); kit.add(m); kit.bob(m, 0.2, 1 + k * 0.07, k, 0.06); }
+      kit.birds({ cx: 200, cz: 0, y: 40, radius: 190, count: 9, speed: 0.08, size: 1.5 });
+      kit.birds({ cx: 320, cz: 60, y: 26, radius: 90, count: 6, speed: -0.12 });
+      const em = []; for (let k = 0; k < 6; k++) { const a = k * 1.05 + 0.4; em.push([200 + Math.cos(a) * 330, 70 + (k % 3) * 18, Math.sin(a) * 260]); }
+      kit.particles({ emitters: em, count: 60, sphere: 22, life: 6.5, win: 0.32, grav: -9, size: 2.2, grow: -0.5, alpha: 1, pow: 0.6, fadeIn: 0.04, color: [0xff4060, 0x40d0ff, 0xffe040, 0x70ff70, 0xff80ff, 0xffa030], burst: true, tex: 'spark', additive: true });
+    }
+    kit.crowdStand({ d0: L - 60, d1: L + 90, side: -1, l0: hwT + 3.5, rows: 2, gap: 1.3, rise: 0, step: 2.2, radius: 60 });
+    kit.crowdStand({ d0: 150, d1: 310, side: 1, l0: 50 + 8, rows: 2, gap: 1.5, rise: 0, step: 3.2, radius: 60, colors: [0xff7ab0, 0x35c0d9, 0xffe14a, 0xffffff] });
     // smoke puffs (6 meshes sharing one geometry)
     const pg = kit.trackGeom(new THREE.IcosahedronGeometry(1, 1)), pm = kit.trackMat(new THREE.MeshLambertMaterial({ color: 0xe8e8ee, transparent: true, opacity: 0.8 }));
     for (const fx of [-20, 110, 335]) for (let k = 0; k < 4; k++) {
@@ -956,6 +999,21 @@
       for (let s = 0; s < 5; s++) lamps.box(sp[0] + Math.cos(shd) * (s - 2) * 6 + Math.sin(shd) * 1.9, gy + yt + 11, sp[1] - Math.sin(shd) * (s - 2) * 6 + Math.cos(shd) * 1.9, 3.2, 4, 0.2, shd, c([0xffe14a, 0xff6a3a, 0x7cf27c, 0xffffff, 0xff8ad0][s]));
       b.box(sp[0] - 14, gy + yt, sp[1], 2, 6, 2, 0, c(0x505560)); b.box(sp[0] + 14, gy + yt, sp[1], 2, 6, 2, 0, c(0x505560));
     }
+    // animated crowd on four seat tiers, one group per quadrant sharing one stadium wave
+    {
+      const groups = [[], [], [], []], NT = 360;
+      for (const j of [1, 3, 5, 7]) for (let i = 0; i < NT; i++) {
+        const t = (i / NT) * PI * 2, p = ring(j * 3.2 + 1.6, t + (j & 2 ? 0.0087 : 0));
+        groups[Math.min(3, (i / (NT / 4)) | 0)].push([p[0], gy + (j + 1) * 1.9, p[1], Math.atan2(cx - p[0], cz - p[1]), t / (PI * 2)]);
+      }
+      groups.forEach((g) => kit.crowd(g, { scale: 1.6, radius: 70, period: 17, woff: 3, waveTime: 9, colors: [0xe8483c, 0x2f78d0, 0xf2c230, 0xffffff, 0x3fae5c, 0xff8ad0, 0x7a5cf0, 0xff9a3a] }));
+      // pennants around the roof rim + sweeping searchlights + fireworks over the bowl
+      const o = TIERS * 3.2, yt = TIERS * 1.9;
+      for (let q = 0; q < 26; q++) { const p = ring(o - 1.5, (q / 26) * PI * 2); kit.flag(p[0], gy + yt + 6, p[1], 4, 2.2, (q * 0.7) % 6.28, q & 1 ? [0xd9482b, 0xffffff] : [0x2f78d0, 0xf2c230], { pole: 4 }); }
+      for (let q = 0; q < 4; q++) { const t = (q / 4) * PI * 2 + PI / 8, p = ring(o - 2, t); kit.lightBeam({ x: p[0], y: gy + 40, z: p[1], len: 120, width: 4, speed: 0.5 * (q & 1 ? 1 : -1), phase: q, tilt: 0.7, count: 1, color: 0xfff2c8, opacity: 0.4 }); }
+      const em = []; for (let k = 0; k < 5; k++) { const a = k * 1.3; em.push([cx + Math.cos(a) * 70, 70 + (k % 3) * 14, cz + Math.sin(a) * 50]); }
+      kit.particles({ emitters: em, count: 55, sphere: 20, life: 7, win: 0.3, grav: -8, size: 2.0, grow: -0.5, alpha: 1, pow: 0.6, fadeIn: 0.04, color: [0xff4060, 0x40d0ff, 0xffe040, 0x70ff70, 0xff80ff, 0xffa030], burst: true, tex: 'spark', additive: true });
+    }
     // ---- infield dressing: dirt mounds, tyre stacks, hay bales, cones
     const m0 = 20;
     kit.scatter(90, 3, 45, m0 + 4, (x, z, i, r) => { const s = 2 + r() * 4; b.blob(x, gy - 0.4, z, s * 2, s * 0.6, s * 1.4, mix3(c(0x8a6238), c(0x6f4b27), r()), 0); });
@@ -1003,7 +1061,7 @@
       const a = (q / 24) * PI * 2 + rng() * 0.2, r = Math.max(A, B) + 140 + rng() * 140, s = 50 + rng() * 60;
       b.blob(cx + Math.cos(a) * r, gy - 6, cz + Math.sin(a) * r, s * 1.4, s * 0.6, s, mix3(c(0x9c7a4a), c(0x7e6a3a), rng()), 1);
     }
-    kit.mesh(b); kit.mesh(lamps, {}, true);
+    kit.mesh(b); { const lm = kit.mesh(lamps, {}, true); if (lm) kit.blinker(lm.material, 1.4, { mode: 'sine', lo: 0.7 }); }
   }
   function msHazards(track, kit) {
     const pal = { pot: 0x4a4f5c, rim: 0xcfd2d8, stem: 0x2e8f3e, leaf: 0x3aa24a, head: 0xc23aa0, head2: 0x8f2a7a, mouth: 0x3a0a2a };

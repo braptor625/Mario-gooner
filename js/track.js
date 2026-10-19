@@ -114,6 +114,59 @@
   }
   const sunTex = () => sharedTex('sunglow', 256, 256, genGlow, false);
 
+  // boost-pad chevron tile (orange, one yellow chevron pointing "up" = forward; scrolled by Track.update)
+  function genChev(ctx, w, h) {
+    ctx.fillStyle = '#ff8a00'; ctx.fillRect(0, 0, w, h);
+    const g = ctx.createLinearGradient(0, 0, w, 0);
+    g.addColorStop(0, 'rgba(120,40,0,0.5)'); g.addColorStop(0.1, 'rgba(120,40,0,0)'); g.addColorStop(0.9, 'rgba(120,40,0,0)'); g.addColorStop(1, 'rgba(120,40,0,0.5)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    const chev = (dy, col) => {
+      ctx.fillStyle = col; ctx.beginPath();
+      ctx.moveTo(w * 0.06, h * (0.66 + dy)); ctx.lineTo(w * 0.5, h * (0.12 + dy)); ctx.lineTo(w * 0.94, h * (0.66 + dy));
+      ctx.lineTo(w * 0.94, h * (0.96 + dy)); ctx.lineTo(w * 0.5, h * (0.42 + dy)); ctx.lineTo(w * 0.06, h * (0.96 + dy)); ctx.closePath(); ctx.fill();
+    };
+    chev(0.03, '#a84a00'); chev(0, '#fff25a');
+  }
+  const chevTex = () => sharedTex('chev', 128, 128, genChev, true);
+  // tileable flowing textures: 'water' (waterfall streaks), 'lava' (molten blobs), 'river' (soft ripples)
+  function genFlow(kind) {
+    return function (ctx, w, h) {
+      const r = mulberry(kind === 'lava' ? 91 : kind === 'river' ? 33 : 57);
+      const wrap = (x, y, rad, fn) => { for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) fn(x + ox * w, y + oy * h); };
+      if (kind === 'lava') {
+        ctx.fillStyle = '#e8430c'; ctx.fillRect(0, 0, w, h);
+        for (let i = 0; i < 26; i++) {
+          const x = r() * w, y = r() * h, rad = 10 + r() * 22, hot = r() < 0.5;
+          wrap(x, y, rad, (px, py) => {
+            const g = ctx.createRadialGradient(px, py, 0, px, py, rad);
+            g.addColorStop(0, hot ? 'rgba(255,230,90,0.95)' : 'rgba(120,20,0,0.75)'); g.addColorStop(1, hot ? 'rgba(255,160,40,0)' : 'rgba(120,20,0,0)');
+            ctx.fillStyle = g; ctx.fillRect(px - rad, py - rad, rad * 2, rad * 2);
+          });
+        }
+      } else if (kind === 'river') {
+        ctx.fillStyle = '#3aa7e0'; ctx.fillRect(0, 0, w, h);
+        for (let i = 0; i < 40; i++) {
+          const x = r() * w, y = r() * h, rad = 6 + r() * 12;
+          wrap(x, y, rad, (px, py) => {
+            const g = ctx.createRadialGradient(px, py, 0, px, py, rad);
+            g.addColorStop(0, 'rgba(255,255,255,0.45)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = g; ctx.fillRect(px - rad, py - rad, rad * 2, rad * 2);
+          });
+        }
+      } else {
+        const g = ctx.createLinearGradient(0, 0, w, 0);
+        g.addColorStop(0, '#4fb6ee'); g.addColorStop(0.5, '#8fdcff'); g.addColorStop(1, '#4fb6ee');
+        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+        for (let i = 0; i < 46; i++) {
+          const x = r() * w, y = r() * h, len = h * (0.25 + r() * 0.5), wd = 2 + r() * 5;
+          ctx.fillStyle = 'rgba(255,255,255,' + (0.25 + r() * 0.5) + ')';
+          wrap(x, y, len, (px, py) => ctx.fillRect(px, py, wd, len));
+        }
+      }
+    };
+  }
+  const flowTex = (kind) => sharedTex('flow_' + kind, 128, 128, genFlow(kind), true);
+
   const lum = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
   const hash2 = (x, z) => { const s = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453; return s - Math.floor(s); };
   const smooth01 = (t) => { t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };
@@ -383,6 +436,8 @@
       this._time = 0;
       this._geoms = []; this._mats = []; this._objs = []; this._tex = [];
       this._anim = {};
+      this._motion = []; this._blinkers = []; this._scrolls = []; this._crowds = []; this._evs = [];
+      this._uT = { value: 0 }; this._clothB = null; this._clothMat = null; this._hk = new Float32Array(32); this._hn = 0; this._lapSeen = [];
       this._hazards = [];
       this._hazOut = [];
       this._res = {
@@ -400,6 +455,7 @@
       this._buildMinimap();
       this._buildWorld(base, rev);
       this._buildCustom(base);
+      this._buildLife();
       this._mirrorPublicData();
     }
 
@@ -654,12 +710,19 @@
       opts = Object.assign({}, opts);
       delete opts.flatShading; // not supported by Lambert/Basic in r128
       const detail = opts.detail; delete opts.detail;
+      const wind = opts.wind; delete opts.wind;
       const m = basic
         ? new THREE.MeshBasicMaterial(Object.assign({ vertexColors: true, side: THREE.DoubleSide }, opts))
         : new THREE.MeshLambertMaterial(Object.assign({ vertexColors: true, side: THREE.DoubleSide }, opts));
       // world-space detail texture on big lit surfaces (never on emissive/basic, textured or transparent ones)
       if (!basic && detail !== false && !opts.map && !opts.transparent) this._detail(m, typeof detail === 'object' ? detail : undefined);
+      if (wind) this._wind(m, wind === true ? {} : wind);
       this._mats.push(m);
+      return m;
+    }
+    // sway leaves / palms / flags with the shared wind shader (patch before the first render)
+    _wind(m, o) {
+      if (G.GFX && G.GFX.patchWind) { try { G.GFX.patchWind(m, Object.assign({ groundY: this.groundY }, o)); } catch (e) { /* ignore */ } }
       return m;
     }
     _mesh(batch, mat, noCull) {
@@ -953,7 +1016,7 @@
           this._mats.push(cm);
           const cl = new THREE.Mesh(cg, cm);
           cl.renderOrder = -997;
-          this._follow(cl, mode === 'space' ? 0.002 : 0.004);
+          this._follow(cl, mode === 'space' ? 0.003 : mode === 'night' ? 0.006 : 0.014);   // clouds drift visibly
           this._add(cl);
         }
       }
@@ -1099,11 +1162,14 @@
         }
       }
       const roadTex = star ? null : asphaltTex();
-      this.roadMesh = this._mesh(road, this._mat(roadTex ? { map: roadTex } : {}, star), true);
+      const roadMat = this._mat(roadTex ? { map: roadTex } : {}, star);
+      if (star) this._hueShift(roadMat);   // the rainbow flows along the ribbon
+      this.roadMesh = this._mesh(road, roadMat, true);
       if (this.roadMesh) this.roadMesh.receiveShadow = true;
 
       // boost pads & jump ramps (flat decals just above the road)
-      const pad = new Batch();
+      const pad = new Batch(), bpad = new Batch(true), cTex = chevTex();
+      const wbat = {};   // animated water decals, one batch per colour
       const orange = col(0xff8a00), yellow = col(0xfff25a), blue = col(0x2c6bff), wht = [1, 1, 1];
       for (let k = 0; k < this.nrect; k++) {
         const q = this.rects[k], boost = q.kind === 'boost';
@@ -1111,6 +1177,14 @@
           if (q.decal === false) continue;
           // surface zone decal
           const zc = q.color !== undefined ? col(q.color) : col(ZONE_COLORS[q.kind] || 0x777777);
+          if (q.kind === 'water' && G.GFX && G.GFX.water) {
+            const wk = q.color !== undefined ? q.color : ZONE_COLORS.water, wb = wbat[wk] || (wbat[wk] = new Batch());
+            for (let d = q.d0; d < q.d1 - 0.01; d += 2) {
+              const d2 = Math.min(q.d1, d + 2);
+              wb.quad(this._PD(d, q.l0, 0.06), this._PD(d, q.l1, 0.06), this._PD(d2, q.l1, 0.06), this._PD(d2, q.l0, 0.06), zc);
+            }
+            continue;
+          }
           for (let d = q.d0; d < q.d1 - 0.01; d += 2) {
             const d2 = Math.min(q.d1, d + 2), sh = ((d / 2) | 0) & 1 ? 1 : 0.93;
             pad.quad(this._PD(d, q.l0, 0.06), this._PD(d, q.l1, 0.06), this._PD(d2, q.l1, 0.06), this._PD(d2, q.l0, 0.06), mul(zc, sh));
@@ -1118,6 +1192,15 @@
           continue;
         }
         const base = boost ? orange : q.kind === 'cannon' ? col(0x8a4a1c) : blue, chev = boost ? yellow : wht;
+        if (boost && cTex) {
+          // animated pad: one textured strip, chevrons scroll forward (map.offset in update)
+          const wq = q.l1 - q.l0;
+          for (let d = q.d0; d < q.d1 - 0.01; d += 1.5) {
+            const d2 = Math.min(q.d1, d + 1.5), v0 = (d - q.d0) / 3, v1 = (d2 - q.d0) / 3;
+            bpad.quadUV(this._PD(d, q.l0, 0.07), this._PD(d, q.l1, 0.07), this._PD(d2, q.l1, 0.07), this._PD(d2, q.l0, 0.07), wht, [0, v0, 1, v0, 1, v1, 0, v1]);
+          }
+          continue;
+        }
         for (let d = q.d0; d < q.d1 - 0.01; d += 2) {
           const d2 = Math.min(q.d1, d + 2);
           pad.quad(this._PD(d, q.l0, 0.07), this._PD(d, q.l1, 0.07), this._PD(d2, q.l1, 0.07), this._PD(d2, q.l0, 0.07), base);
@@ -1140,6 +1223,16 @@
       const padMat = this._mat({}, true);
       this.padMesh = this._mesh(pad, padMat, true);
       this._padMat = padMat;
+      if (!bpad.empty) {
+        const bm = this._mat({ map: cTex }, true);
+        this._boostMat = bm; this._boostTex = cTex;
+        this._mesh(bpad, bm, true);
+      }
+      for (const wk in wbat) {
+        const wm = this._waterMat({ color: +wk, opacity: 0.86 });
+        const m = this._mesh(wbat[wk], wm, true);
+        if (m) m.renderOrder = 2;
+      }
     }
 
     // shoulders, embankments, walls/fences
@@ -1230,6 +1323,12 @@
         }
       }
       this.arch = this._mesh(b, this._mat({}, false), true);
+      // waving pennants on the arch posts (cloth batch, vertex-animated)
+      const hd = Math.atan2(f.tx, f.tz);
+      for (let s = -1; s <= 1; s += 2) {
+        const l = s * (wd + 1.2);
+        this._flag(f.x + f.rx * l, f.y + 9, f.z + f.rz * l, 4.2, 2.2, hd - Math.PI / 2, s < 0 ? [star ? 0xff6ad5 : 0xe8383d, 0xffffff] : [star ? 0x6fe6ff : 0x2a54c8, 0xffffff], { pole: 3.2, pattern: 'check' });
+      }
     }
 
     // ------------------------------------------------ scenery
@@ -1349,6 +1448,7 @@
       geo.setAttribute('normal', new THREE.Float32BufferAttribute(Nn, 3));
       this._geoms.push(geo);
       const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+      this._wind(mat, { strength: o.windStrength !== undefined ? o.windStrength : 0.5, heightScale: 1.5, groundY: 0, speed: 2.1 });
       this._mats.push(mat);
       const mesh = new THREE.InstancedMesh(geo, mat, count);
       const greens = (o.colors || [0x4fb04a, 0x66c457, 0x3f9e44, 0x7ad060]).map(col);
@@ -1380,7 +1480,7 @@
     }
 
     _buildScenery(def, lake) {
-      const theme = this.theme, gy = this.groundY, b = new Batch();
+      const theme = this.theme, gy = this.groundY, b = new Batch(), fb = new Batch();   // fb: foliage (swayed by the wind shader)
       const marginTree = this.shoulder + 15 + EMB * 0.5;   // from centerline: hw ~13 + shoulder + embankment
       const m0 = 13 + this.shoulder + EMB + 3;
       if (lake) this._noGo.push({ x: lake.x, z: lake.z, r: lake.r + 4 });
@@ -1389,7 +1489,7 @@
       if (theme === 'meadow') {
         this._scatter(240, 2, 70, m0, (x, z, i, r) => {
           const s = 0.85 + r() * 0.8;
-          this._tree(b, x, gy, z, s, r() < 0.3 ? 'pine' : 'round');
+          this._tree(fb, x, gy, z, s, r() < 0.3 ? 'pine' : 'round');
         });
         this._scatter(120, 1, 45, m0 - 4, (x, z, i, r) => b.blob(x, gy + 0.5, z, 1.2 + r(), 0.9 + r() * 0.5, 1.2 + r(), jit(col(0x3f9f45), r), 0));
         this._tufts(700, 0.4, this.shoulder + EMB + 12, { flowers: 0.35 });
@@ -1407,7 +1507,7 @@
           b.box(x + side * 0.7 * s, gy + 1.5 * s, z, 0.9 * s, 0.4 * s, 0.4 * s, 0, c);
           b.box(x + side * 1.05 * s, gy + 1.5 * s, z, 0.4 * s, 1.3 * s, 0.4 * s, 0, c);
         });
-        this._scatter(34, 3, 50, m0, (x, z, i, r) => this._tree(b, x, gy, z, 0.9 + r() * 0.6, 'palm'));
+        this._scatter(34, 3, 50, m0, (x, z, i, r) => this._tree(fb, x, gy, z, 0.9 + r() * 0.6, 'palm'));
         this._tufts(320, 0.4, this.shoulder + EMB + 10, { colors: [0xb8a24a, 0x9aa04a, 0xc8b060, 0x8f9a45], flowers: 0.08, flowerColors: [0xffd36f, 0xff8a5a], scale: [0.7, 1.3] });
         this._scatter(110, 2, 70, m0 - 3, (x, z, i, r) => {
           const s = 0.8 + r() * 2.2;
@@ -1446,7 +1546,7 @@
         });
       } else if (theme === 'glacier') {
         const snowTop = col(0xffffff);
-        this._scatter(230, 2, 70, m0, (x, z, i, r) => this._tree(b, x, gy, z, 0.85 + r() * 1.0, 'snowpine'));
+        this._scatter(230, 2, 70, m0, (x, z, i, r) => this._tree(fb, x, gy, z, 0.85 + r() * 1.0, 'snowpine'));
         this._scatter(90, 1, 60, m0 - 3, (x, z, i, r) => {
           const s = 0.8 + r() * 2.2;
           b.blob(x, gy + 0.3 * s, z, 1.7 * s, 1.2 * s, 1.5 * s, jit(col(0xbfe6ff), r), 0);
@@ -1498,6 +1598,10 @@
       const mat = this._mat({}, theme === 'starlight');
       this.sceneryMesh = this._mesh(b, mat, true);
       if (this.sceneryMesh) this.sceneryMesh.receiveShadow = true;
+      if (!fb.empty) {
+        this.foliageMesh = this._mesh(fb, this._mat({ wind: { strength: 0.32, heightScale: 0.17 } }, theme === 'starlight'), true);
+        if (this.foliageMesh) this.foliageMesh.receiveShadow = true;
+      }
 
       // meadow lake
       if (theme === 'meadow' && lake) {
@@ -1539,6 +1643,439 @@
       this.snow = this._add(pts);
     }
 
+    // ================================================== v5 LIVELINESS (flags, crowds, spinners, particles, flow ...)
+    _waterMat(o) {
+      o = o || {};
+      const color = o.color !== undefined ? o.color : 0x3aa7e0, opacity = o.opacity !== undefined ? o.opacity : 0.88;
+      let m;
+      if (G.GFX && G.GFX.water) { m = G.GFX.water({ color, deep: o.deep, opacity, waveScale: o.waveScale }); m.side = THREE.DoubleSide; }
+      else m = new THREE.MeshPhongMaterial({ color, shininess: 90, specular: 0xaaccee, transparent: opacity < 1, opacity, side: THREE.DoubleSide });
+      this._mats.push(m);
+      return m;
+    }
+    _g(g) { this._geoms.push(g); return g; }
+    // slowly rotate the hue of a vertex-coloured material (rainbow road); greys / whites stay put
+    _hueShift(m) {
+      const uT = this._uT;
+      m.onBeforeCompile = (sh) => {
+        sh.uniforms.uT = uT;
+        sh.vertexShader = 'uniform float uT;\nvec3 hueRot( vec3 c, float a ){ mat3 T = mat3( 0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312 ); mat3 Ti = mat3( 1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703 );\n' +
+          ' vec3 y = T * c; float ca = cos( a ), sa = sin( a ); y = vec3( y.x, y.y * ca - y.z * sa, y.y * sa + y.z * ca ); return clamp( Ti * y, 0.0, 2.0 ); }\n' +
+          sh.vertexShader.replace('#include <color_vertex>', '#include <color_vertex>\n vColor.rgb = hueRot( vColor.rgb, uT * 0.55 );');
+      };
+      m.customProgramCacheKey = () => 'hue5';
+      return m;
+    }
+    // square prism between two points (used for arms / spokes)
+    _prism(b, a, c, w, k) {
+      let dx = c[0] - a[0], dy = c[1] - a[1], dz = c[2] - a[2];
+      const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
+      let ux = 0, uy = 1, uz = 0;
+      if (Math.abs(dy) > 0.95) { ux = 1; uy = 0; }
+      let n1x = dy * uz - dz * uy, n1y = dz * ux - dx * uz, n1z = dx * uy - dy * ux, nl = Math.hypot(n1x, n1y, n1z) || 1;
+      n1x /= nl; n1y /= nl; n1z /= nl;
+      let n2x = dy * n1z - dz * n1y, n2y = dz * n1x - dx * n1z, n2z = dx * n1y - dy * n1x; nl = Math.hypot(n2x, n2y, n2z) || 1;
+      n2x /= nl; n2y /= nl; n2z /= nl;
+      const cn = (p, s1, s2) => [p[0] + (n1x * s1 + n2x * s2) * w, p[1] + (n1y * s1 + n2y * s2) * w, p[2] + (n1z * s1 + n2z * s2) * w];
+      const A = [cn(a, -1, -1), cn(a, 1, -1), cn(a, 1, 1), cn(a, -1, 1)], C = [cn(c, -1, -1), cn(c, 1, -1), cn(c, 1, 1), cn(c, -1, 1)];
+      for (let i = 0; i < 4; i++) { const j = (i + 1) & 3; b.quad(A[i], A[j], C[j], C[i], k); }
+    }
+
+    // ---- cloth: one merged mesh for every flag / banner / bunting of the course (vertex-shader waving)
+    _clothBatch() { return this._clothB || (this._clothB = new Batch(true)); }
+    _clothMaterial() {
+      if (this._clothMat) return this._clothMat;
+      const m = this._mat({ detail: false }, false), uT = this._uT;
+      m.onBeforeCompile = (sh) => {
+        sh.uniforms.uT = uT;
+        sh.vertexShader = 'uniform float uT;\nfloat clothW( vec2 a, vec3 p ){ float ph = p.x * 0.31 + p.z * 0.37; return sin( a.y * 7.0 - uT * 6.0 + ph ) + 0.4 * sin( a.y * 13.0 - uT * 9.5 + ph * 1.7 ); }\n' +
+          sh.vertexShader
+            .replace('#include <color_vertex>', '#include <color_vertex>\n vColor *= 0.9 + 0.1 * clothW( uv, position ) * min( uv.x * 2.0, 1.0 );')
+            .replace('#include <begin_vertex>', '#include <begin_vertex>\n transformed += normal * clothW( uv, position ) * uv.x;');
+      };
+      m.customProgramCacheKey = () => 'cloth5';
+      this._clothMat = m;
+      return m;
+    }
+    _cloth(O, U, V, nu, nv, colorFn, attach, amp) {
+      const b = this._clothBatch(), top = attach === 'v1';
+      const P = (i, j) => [O[0] + (U[0] * i) / nu + (V[0] * j) / nv, O[1] + (U[1] * i) / nu + (V[1] * j) / nv, O[2] + (U[2] * i) / nu + (V[2] * j) / nv];
+      const w = (i, j) => (top ? 1 - j / nv : i / nu);
+      for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
+        const a = w(i, j), bb = w(i + 1, j), c = w(i + 1, j + 1), d = w(i, j + 1);
+        b.quadUV(P(i, j), P(i + 1, j), P(i + 1, j + 1), P(i, j + 1), colorFn(i, j), [a * amp, a, bb * amp, bb, c * amp, c, d * amp, d]);
+      }
+    }
+    _patFn(colors, pattern) {
+      const cs = (colors && colors.length ? colors : [0xe8383d, 0xffffff]).map(col), n = cs.length;
+      pattern = pattern || (n > 1 ? 'stripes' : 'solid');
+      if (pattern === 'solid') return () => cs[0];
+      if (pattern === 'check') return (i, j) => cs[((i >> 1) + j) % n < 0 ? 0 : ((i >> 1) + j) % n];
+      if (pattern === 'vstripes') return (i) => cs[(i >> 1) % n];
+      return (i, j) => cs[j % n];
+    }
+    // flag on a pole: base at (x,y,z), cloth w x h flying along heading ry
+    _flag(x, y, z, w, h, ry, colors, o) {
+      o = o || {};
+      const b = this._clothBatch(), pole = o.pole !== undefined ? o.pole : h * 2.4, c = Math.cos(ry), s = Math.sin(ry);
+      b.box(x, y, z, 0.16, pole, 0.16, ry, col(o.poleColor !== undefined ? o.poleColor : 0xd8d8e0));
+      b.blob(x, y + pole + 0.1, z, 0.14, 0.14, 0.14, col(0xffd23a), 0);
+      const nu = Math.max(6, Math.round(w * 2.2)), nv = Math.max(2, Math.round(h * 1.6));
+      this._cloth([x, y + pole - h, z], [w * c, 0, -w * s], [0, h, 0], nu, nv, this._patFn(colors, o.pattern), 'u0', o.amp !== undefined ? o.amp : Math.min(0.9, 0.12 * w + 0.15));
+    }
+    // banner hanging from a rod: top edge centred on (x, y+h, z), bottom at y, width w along heading ry
+    _banner(x, y, z, w, h, ry, colors, o) {
+      o = o || {};
+      const b = this._clothBatch(), c = Math.cos(ry), s = Math.sin(ry), nu = Math.max(4, Math.round(w * 2)), nv = Math.max(3, Math.round(h * 1.8));
+      b.box(x, y + h, z, w + 0.5, 0.14, 0.14, ry, col(o.poleColor !== undefined ? o.poleColor : 0x8a8a96));
+      if (o.ground !== undefined) for (let sd = -1; sd <= 1; sd += 2) b.box(x + sd * (w / 2 + 0.2) * c, o.ground, z - sd * (w / 2 + 0.2) * s, 0.16, y + h + 0.3 - o.ground, 0.16, ry, col(0x8a8a96));
+      this._cloth([x - (w / 2) * c, y, z + (w / 2) * s], [w * c, 0, -w * s], [0, h, 0], nu, nv, this._patFn(colors, o.pattern || 'vstripes'), 'v1', o.amp !== undefined ? o.amp : 0.22);
+    }
+    // string of triangular pennants between two points
+    _bunting(a, bp, colors, n, size, sag) {
+      const cl = (colors && colors.length ? colors : [0xe8383d, 0xffd23a, 0x3ad1ff, 0x59e06b]).map(col), bt = this._clothBatch();
+      const len = Math.hypot(bp[0] - a[0], bp[1] - a[1], bp[2] - a[2]);
+      sag = sag === undefined ? len * 0.05 : sag; size = size || 0.8;
+      const P = (t) => [a[0] + (bp[0] - a[0]) * t, a[1] + (bp[1] - a[1]) * t - sag * 4 * t * (1 - t), a[2] + (bp[2] - a[2]) * t];
+      for (let k = 0; k < n; k++) {
+        const p0 = P((k + 0.08) / n), p1 = P((k + 0.92) / n), pm = P((k + 0.5) / n);
+        bt.tri(p0, p1, [pm[0], pm[1] - size * 1.2, pm[2]], cl[k % cl.length]);
+        const u = bt.uv, m = u.length - 6; u[m + 4] = 0.3 * size; u[m + 5] = 1;
+      }
+    }
+    _finishCloth() {
+      if (this._clothB && !this._clothB.empty) this._mesh(this._clothB, this._clothMaterial(), true);
+      this._clothB = null;
+    }
+
+    // ---- motion registry: spinners / sways / bobs / slides (time-based, allocation free)
+    _spin(obj, axis, speed, phase) { this._motion.push({ t: 0, o: obj, ax: axis || 'y', sp: speed || 1, ph: phase || 0, b: obj.rotation[axis || 'y'] }); return obj; }
+    _sway(obj, axis, amp, speed, phase) { this._motion.push({ t: 1, o: obj, ax: axis || 'z', amp: amp || 0.1, sp: speed || 1, ph: phase || 0, b: obj.rotation[axis || 'z'] }); return obj; }
+    _bob(obj, amp, speed, phase, roll) {
+      this._motion.push({ t: 2, o: obj, amp: amp === undefined ? 0.15 : amp, sp: speed || 1.2, ph: phase || 0, roll: roll === undefined ? 0.05 : roll, y0: obj.position.y, rx: obj.rotation.x, rz: obj.rotation.z });
+      return obj;
+    }
+    _slide(obj, dx, dy, dz, speed, phase) { this._motion.push({ t: 4, o: obj, dx, dy, dz, sp: speed || 0.3, ph: phase || 0, x0: obj.position.x, y0: obj.position.y, z0: obj.position.z }); return obj; }
+    // convenience: build a batch around its own origin, place it at (x,y,z) heading ry, spin it about a local axis
+    _spinBatch(batch, o) {
+      o = o || {};
+      const grp = new THREE.Group(); grp.position.set(o.x || 0, o.y || 0, o.z || 0); grp.rotation.y = o.ry || 0;
+      const mesh = new THREE.Mesh(this._g(batch.build()), this._mat(o.matOpts || {}, !!o.basic));
+      mesh.frustumCulled = false; grp.add(mesh); this._add(grp);
+      this._spin(mesh, o.axis || 'z', o.speed || 1, o.phase || 0);
+      return grp;
+    }
+    // rotating light beam(s) (lighthouse / searchlight): additive fans from (x,y,z); o: {len, width, color, speed, count, tilt, phase}
+    _lightBeam(o) {
+      const bm = new Batch(), len = o.len || 90, wd = o.width || 8, cnt = o.count || 2, c = col(o.color !== undefined ? o.color : 0xfff2a0), tilt = o.tilt || 0;
+      for (let k = 0; k < cnt; k++) {
+        const a = (k / cnt) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+        const A = [0, 0, 0], F0 = [ca * len - sa * wd, len * tilt, sa * len + ca * wd], F1 = [ca * len + sa * wd, len * tilt, sa * len - ca * wd], P0 = [-sa * 0.4, 0, ca * 0.4], P1 = [sa * 0.4, 0, -ca * 0.4];
+        const z = [0, 0, 0];
+        const V0 = [ca * len, len * tilt - wd * 0.7, sa * len], V1 = [ca * len, len * tilt + wd * 0.7, sa * len], Q0 = [0, -0.4, 0], Q1 = [0, 0.4, 0];
+        for (const fan of [[P0, P1, F1, F0], [Q0, Q1, V1, V0]]) {
+          bm.tri(fan[0], fan[1], fan[2], c); bm.tri(fan[0], fan[2], fan[3], c);
+          const cc = bm.c, m = cc.length - 18;
+          for (const q of [2, 4, 5]) { cc[m + q * 3] = z[0]; cc[m + q * 3 + 1] = z[1]; cc[m + q * 3 + 2] = z[2]; }
+        }
+        void A;
+      }
+      return this._spinBatch(bm, { x: o.x || 0, y: o.y || 0, z: o.z || 0, axis: 'y', speed: o.speed || 0.7, phase: o.phase || 0, basic: true,
+        matOpts: { transparent: true, opacity: o.opacity !== undefined ? o.opacity : 0.55, blending: THREE.AdditiveBlending, depthWrite: false } });
+    }
+    _blinker(mat, period, o) {
+      o = o || {};
+      const c = o.emissive && mat.emissive ? mat.emissive : mat.color;
+      const alt = o.alt !== undefined ? new THREE.Color(o.alt) : null;
+      this._blinkers.push({ m: mat, c, r: c.r, g: c.g, b: c.b, ar: alt ? alt.r : 0, ag: alt ? alt.g : 0, ab: alt ? alt.b : 0, alt: !!alt, per: period || 1, ph: o.phase || 0, duty: o.duty !== undefined ? o.duty : 0.5,
+        lo: o.lo !== undefined ? o.lo : 0.12, hi: o.hi !== undefined ? o.hi : 1, sine: o.mode === 'sine' });
+      return mat;
+    }
+    _scroll(tex, du, dv) { this._scrolls.push({ t: tex, u: du || 0, v: dv || 0 }); return tex; }
+    _flowMat(kind, o) {
+      o = o || {};
+      const base = flowTex(kind || 'water');
+      let map = null;
+      if (base) {
+        map = base.clone(); map.needsUpdate = true; map.wrapS = map.wrapT = THREE.RepeatWrapping;
+        if (o.repeat) map.repeat.set(o.repeat[0], o.repeat[1]);
+        this._tex.push(map);
+        if (o.speed) this._scrolls.push({ t: map, u: o.speed[0], v: o.speed[1] });
+      }
+      const m = new THREE.MeshBasicMaterial({ map, color: o.color !== undefined ? o.color : 0xffffff, side: THREE.DoubleSide, transparent: o.opacity !== undefined && o.opacity < 1, opacity: o.opacity !== undefined ? o.opacity : 1 });
+      if (!map && o.fallback !== undefined) m.color.setHex(o.fallback);
+      this._mats.push(m);
+      return m;
+    }
+    // quad panel p0 bottom-left, p1 bottom-right, p2 top-right, p3 top-left ([x,y,z] each); uv 0..rep
+    _panel(c, mat, rep) {
+      rep = rep || [1, 1];
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute([].concat(c[0], c[1], c[2], c[3]), 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, rep[0], 0, rep[0], rep[1], 0, rep[1]], 2));
+      g.setIndex([0, 1, 2, 0, 2, 3]); g.computeVertexNormals(); this._g(g);
+      const m = new THREE.Mesh(g, mat); m.frustumCulled = false;
+      return this._add(m);
+    }
+    // ribbon over the road (uv: u across 0..ur, v along in tiles of `tile` metres)
+    _ribbon(d0, d1, l0, l1, dy, mat, o) {
+      o = o || {};
+      const step = o.step || 4, tile = o.tile || 8, ur = o.ur || 1, n = Math.max(1, Math.ceil((d1 - d0) / step)), pos = [], uv = [], idx = [];
+      for (let i = 0; i <= n; i++) {
+        const d = d0 + ((d1 - d0) * i) / n, a = this._PD(d, l0, dy), c = this._PD(d, l1, dy);
+        pos.push(a[0], a[1], a[2], c[0], c[1], c[2]); uv.push(0, (d - d0) / tile, ur, (d - d0) / tile);
+        if (i < n) { const q = i * 2; idx.push(q, q + 1, q + 3, q, q + 3, q + 2); }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx); g.computeVertexNormals(); this._g(g);
+      const m = new THREE.Mesh(g, mat); m.frustumCulled = false;
+      return this._add(m);
+    }
+
+    // ---- particles: one Points draw, all animation in the vertex shader (no CPU per frame)
+    // o: {emitters:[[x,y,z]..], count, vel:[x,y,z], spread:[x,y,z], jitter:[x,y,z], sphere, burst, life, size, grow, grav, wob, alpha,
+    //     pow, fadeIn, win, color:hex|[hex..], tex:'soft'|'spark', additive, depthTest}
+    _particles(o) {
+      const em = o.emitters || [[o.x || 0, o.y || 0, o.z || 0]], cnt = o.count || 10, n = em.length * cnt;
+      const pos = new Float32Array(n * 3), dir = new Float32Array(n * 3), seed = new Float32Array(n * 2), colA = new Float32Array(n * 3);
+      const vel = o.vel || [0, 1, 0], sp = o.spread || [0.3, 0.3, 0.3], jt = o.jitter || [0, 0, 0];
+      const cols = (Array.isArray(o.color) ? o.color : [o.color !== undefined ? o.color : 0xffffff]).map(col);
+      const rng = this.rng;
+      for (let e = 0; e < em.length; e++) {
+        const ph = rng(), ec = cols[o.burst ? e % cols.length : 0];
+        for (let k = 0; k < cnt; k++) {
+          const i = e * cnt + k;
+          pos[i * 3] = em[e][0] + (rng() - 0.5) * 2 * jt[0]; pos[i * 3 + 1] = em[e][1] + (rng() - 0.5) * 2 * jt[1]; pos[i * 3 + 2] = em[e][2] + (rng() - 0.5) * 2 * jt[2];
+          if (o.sphere) {
+            const u = rng() * 2 - 1, a = rng() * 6.2832, r = Math.sqrt(1 - u * u), v = o.sphere * (0.55 + 0.45 * rng());
+            dir[i * 3] = Math.cos(a) * r * v; dir[i * 3 + 1] = u * v; dir[i * 3 + 2] = Math.sin(a) * r * v;
+          } else {
+            dir[i * 3] = vel[0] + (rng() - 0.5) * 2 * sp[0]; dir[i * 3 + 1] = vel[1] + (rng() - 0.5) * 2 * sp[1]; dir[i * 3 + 2] = vel[2] + (rng() - 0.5) * 2 * sp[2];
+          }
+          seed[i * 2] = o.burst ? ph : (k + rng() * 0.8) / cnt; seed[i * 2 + 1] = rng();
+          const c = o.burst ? ec : cols[(rng() * cols.length) | 0];
+          colA[i * 3] = c[0]; colA[i * 3 + 1] = c[1]; colA[i * 3 + 2] = c[2];
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aDir', new THREE.BufferAttribute(dir, 3));
+      g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 2)); g.setAttribute('color', new THREE.BufferAttribute(colA, 3));
+      this._g(g);
+      const tex = o.tex === 'spark' ? (gfxTex('spark') || gfxTex('soft') || sunTex()) : (gfxTex('soft') || sunTex());
+      const m = new THREE.PointsMaterial({ size: o.size || 1, sizeAttenuation: true, vertexColors: true, map: tex, transparent: true, depthWrite: false, depthTest: o.depthTest !== false,
+        blending: o.additive ? THREE.AdditiveBlending : THREE.NormalBlending });
+      const U = { uT: this._uT, uLife: { value: o.life || 2 }, uGrav: { value: o.grav || 0 }, uGrow: { value: o.grow || 0 }, uPA: { value: o.alpha !== undefined ? o.alpha : 0.8 },
+        uPow: { value: o.pow !== undefined ? o.pow : 1 }, uIn: { value: o.fadeIn || 0.12 }, uWin: { value: o.win || 1 }, uWob: { value: o.wob || 0 } };
+      m.onBeforeCompile = (sh) => {
+        Object.assign(sh.uniforms, U);
+        sh.vertexShader = 'uniform float uT; uniform float uLife; uniform float uGrav; uniform float uGrow; uniform float uPA; uniform float uPow; uniform float uIn; uniform float uWin; uniform float uWob;\n' +
+          'attribute vec3 aDir; attribute vec2 aSeed; varying float vPA; float pSz;\n' + sh.vertexShader
+            .replace('#include <begin_vertex>', '#include <begin_vertex>\n float pf = fract( uT / uLife + aSeed.x ); float pwf = pf / uWin; float ptt = pf * uLife;\n' +
+              ' transformed += aDir * ptt + vec3( 0.0, 0.5 * uGrav * ptt * ptt, 0.0 );\n' +
+              ' transformed.x += sin( ptt * 1.7 + aSeed.y * 40.0 ) * uWob * pf; transformed.z += cos( ptt * 1.3 + aSeed.y * 31.0 ) * uWob * pf;\n' +
+              ' float pk = pwf < 1.0 ? 1.0 : 0.0;\n' +
+              ' vPA = uPA * clamp( pwf / uIn, 0.0, 1.0 ) * pow( max( 1.0 - pwf, 0.0 ), uPow ) * pk;\n' +
+              ' pSz = ( 0.6 + 0.8 * aSeed.y ) * ( 1.0 + uGrow * pwf ) * pk;')
+            .replace('gl_PointSize = size;', 'gl_PointSize = size * pSz;');
+        sh.fragmentShader = 'varying float vPA;\n' + sh.fragmentShader.replace('#include <alphatest_fragment>', 'diffuseColor.a *= vPA;\n#include <alphatest_fragment>');
+      };
+      m.customProgramCacheKey = () => 'ptfx5';
+      this._mats.push(m);
+      const pts = new THREE.Points(g, m);
+      pts.frustumCulled = false; pts.renderOrder = o.additive ? 8 : 6;
+      return this._add(pts);
+    }
+    // flocks of flapping birds circling (cx, cz) at height y; one InstancedMesh for the whole course
+    _birds(o) {
+      o = o || {};
+      const n = o.count || 7, sz = o.size || 1.1;
+      const gk = (o.body !== undefined ? o.body : 0x383840) + '_' + (o.wing !== undefined ? o.wing : 0xf4f4ff);
+      this._birdGeos = this._birdGeos || {};
+      let geo = this._birdGeos[gk];
+      if (!geo) {
+        const b = new Batch(), body = col(o.body !== undefined ? o.body : 0x383840), wing = col(o.wing !== undefined ? o.wing : 0xf4f4ff);
+        b.tri([0, 0, 0.45], [-0.12, 0, -0.35], [0.12, 0, -0.35], body);
+        b.tri([-0.05, 0, 0.1], [-1.0, 0.05, -0.15], [-0.1, 0, -0.3], wing); b.tri([0.05, 0, 0.1], [0.1, 0, -0.3], [1.0, 0.05, -0.15], wing);
+        geo = this._birdGeos[gk] = this._g(b.build());
+      }
+      if (!this._birdMat) {
+        const m = this._mat({ detail: false }, true), uT = this._uT;
+        m.onBeforeCompile = (sh) => {
+          sh.uniforms.uT = uT;
+          sh.vertexShader = 'uniform float uT;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n transformed.y += abs( position.x ) * 0.55 * sin( uT * 11.0 + instanceMatrix[3][0] * 0.9 + instanceMatrix[3][2] * 0.7 );');
+        };
+        m.customProgramCacheKey = () => 'birds5';
+        this._birdMat = m;
+      }
+      const im = new THREE.InstancedMesh(geo, this._birdMat, n);
+      im.frustumCulled = false; im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      const rec = { t: 3, im, n, cx: o.cx || 0, cz: o.cz || 0, y: o.y || 45, R: o.radius || 60, sp: o.speed || 0.12, sz, ph: [], rr: [], yy: [], dir: o.dir || 1 };
+      for (let i = 0; i < n; i++) { rec.ph.push((i / n) * 6.2832 + this.rng() * 0.6); rec.rr.push(1 + (this.rng() - 0.5) * 0.3); rec.yy.push((this.rng() - 0.5) * 6); }
+      this._motion.push(rec); this._add(im); this._stepBirds(rec, 0);
+      return im;
+    }
+    _stepBirds(m, time) {
+      const a = m.im.instanceMatrix.array, s = m.sz;
+      for (let i = 0; i < m.n; i++) {
+        const ang = m.ph[i] + time * m.sp * m.dir, R = m.R * m.rr[i], c = Math.cos(ang), sn = Math.sin(ang);
+        const x = m.cx + c * R, z = m.cz + sn * R, y = m.y + m.yy[i] + Math.sin(time * 0.7 + i) * 1.5;
+        // heading = tangent of the circle
+        const fx = -sn * m.dir, fz = c * m.dir, cy = fz, sy = fx, o = i * 16;
+        a[o] = cy * s; a[o + 1] = 0; a[o + 2] = -sy * s; a[o + 3] = 0; a[o + 4] = 0; a[o + 5] = s; a[o + 6] = 0; a[o + 7] = 0;
+        a[o + 8] = sy * s; a[o + 9] = 0; a[o + 10] = cy * s; a[o + 11] = 0; a[o + 12] = x; a[o + 13] = y; a[o + 14] = z; a[o + 15] = 1;
+      }
+      m.im.instanceMatrix.needsUpdate = true;
+    }
+
+    // ---- crowds: instanced spectators (body + head/arms), bounce, do the wave, cheer near human karts / on events
+    _crowdGeo() {
+      if (this._cGeo) return this._cGeo;
+      const bb = new Batch(), hb = new Batch(), w = [1, 1, 1];
+      bb.frustum(0, 0, 0, 0.3, 0.23, 0.78, 7, w, 0);
+      bb.blob(0, 0.78, 0, 0.27, 0.13, 0.22, w, 0);
+      hb.blob(0, 1.03, 0, 0.26, 0.28, 0.26, w, 0);
+      for (let sd = -1; sd <= 1; sd += 2) this._prism(hb, [sd * 0.25, 0.7, 0], [sd * 0.52, 1.32, 0.04], 0.075, w);
+      this._cGeo = [this._g(bb.build()), this._g(hb.build())];
+      return this._cGeo;
+    }
+    // spots: [[x,y,z, ry?, u?]] ; o: {scale, colors:[hex], skin:[hex], radius, wave:true, idle, group}
+    _crowd(spots, o) {
+      o = o || {};
+      const n = spots.length; if (!n) return null;
+      const [gb, gh] = this._crowdGeo(), mb = this._mat({ detail: false }, false), mh = this._mat({ detail: false }, false);
+      const bi = new THREE.InstancedMesh(gb, mb, n), hi = new THREE.InstancedMesh(gh, mh, n);
+      bi.instanceMatrix.setUsage(THREE.DynamicDrawUsage); hi.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      const shirts = (o.colors || [0xe8383d, 0xffd23a, 0x3a8cff, 0x59d66b, 0xff7ad9, 0xffffff, 0xff9a2e, 0xa56bff, 0x35d0c8]).map((h) => new THREE.Color(h));
+      const skins = (o.skin || [0xf6d2b0, 0xe0a87c, 0xa8744a, 0xfff0a0, 0xd8c0f0]).map((h) => new THREE.Color(h));
+      const c = { bi, hi, n, x: new Float32Array(n), y: new Float32Array(n), z: new Float32Array(n), cs: new Float32Array(n), sn: new Float32Array(n), ph: new Float32Array(n), u: new Float32Array(n),
+        sc: o.scale || 1.1, idle: o.idle !== undefined ? o.idle : 0.06, wave: o.wave !== false, period: o.period || 14 + this.rng() * 5, wsp: o.waveTime || 3.2, woff: o.woff !== undefined ? o.woff : this.rng() * 14, cheer: 0, boost: 0, cx: 0, cz: 0, ext: 20, R: 55, ax: 0 };
+      let sx = 0, sz = 0;
+      for (let i = 0; i < n; i++) {
+        const s = spots[i], ry = s[3] || 0;
+        c.x[i] = s[0]; c.y[i] = s[1]; c.z[i] = s[2]; c.cs[i] = Math.cos(ry); c.sn[i] = Math.sin(ry); c.ph[i] = this.rng() * 6.283; c.u[i] = s[4] !== undefined ? s[4] : i / Math.max(1, n - 1);
+        sx += s[0]; sz += s[2];
+        bi.setColorAt(i, shirts[(this.rng() * shirts.length) | 0]); hi.setColorAt(i, skins[(this.rng() * skins.length) | 0]);
+      }
+      c.cx = sx / n; c.cz = sz / n;
+      for (let i = 0; i < n; i++) c.ext = Math.max(c.ext, Math.hypot(c.x[i] - c.cx, c.z[i] - c.cz));
+      c.R = o.radius || 50;
+      bi.frustumCulled = hi.frustumCulled = false;
+      this._poseCrowd(c, 0, 0);
+      bi.instanceColor.needsUpdate = true; hi.instanceColor.needsUpdate = true;
+      this._add(bi); this._add(hi);
+      this._crowds.push(c);
+      return c;
+    }
+    _poseCrowd(c, time, dt) {
+      const ar = c.bi.instanceMatrix.array, ah = c.hi.instanceMatrix.array, ch = c.cheer, rate = 5.2 + ch * 5.5, amp = c.idle + ch * 0.5 * c.sc, n = c.n, sc = c.sc, sy = sc * (1 + ch * 0.1);
+      let front = -9;
+      if (c.wave) { const tt = (time + c.woff) % c.period; front = tt / c.wsp - 0.15; if (front > 1.2) front = -9; }
+      for (let i = 0; i < n; i++) {
+        let b = Math.abs(Math.sin(time * rate + c.ph[i])) * amp;
+        if (front > -5) { const dd = Math.abs(c.u[i] - front); if (dd < 0.13) { const k = 1 - dd / 0.13; b += k * k * (3 - 2 * k) * 0.6 * sc; } }
+        const o = i * 16, cc = c.cs[i] * sc, ss = c.sn[i] * sc;
+        ar[o] = cc; ar[o + 1] = 0; ar[o + 2] = -ss; ar[o + 3] = 0; ar[o + 4] = 0; ar[o + 5] = sy; ar[o + 6] = 0; ar[o + 7] = 0;
+        ar[o + 8] = ss; ar[o + 9] = 0; ar[o + 10] = cc; ar[o + 11] = 0; ar[o + 12] = c.x[i]; ar[o + 13] = c.y[i] + b; ar[o + 14] = c.z[i]; ar[o + 15] = 1;
+        for (let q = 0; q < 16; q++) ah[o + q] = ar[o + q];
+      }
+      c.bi.instanceMatrix.needsUpdate = true; c.hi.instanceMatrix.needsUpdate = true;
+    }
+    // grandstand-style spot list along the road: {d0,d1,side(+1 right/-1 left),l0 (lateral of the first row), rows, gap (m between rows), rise (per row), step (m along), jitter, dy}
+    _standSpots(o) {
+      const out = [], side = o.side || 1, step = o.step || 1.5, rows = o.rows || 3, gap = o.gap || 1.3, rise = o.rise !== undefined ? o.rise : 0.7, rng = this.rng, f = {};
+      const span = o.d1 - o.d0;
+      for (let d = o.d0; d <= o.d1; d += step) {
+        this._frame(d, f);
+        for (let r = 0; r < rows; r++) {
+          const l = side * (o.l0 + r * gap) + (rng() - 0.5) * (o.jitter !== undefined ? o.jitter : 0.4);
+          const dd = (rng() - 0.5) * (o.jitter !== undefined ? o.jitter : 0.4);
+          const x = f.x + f.rx * l + f.tx * dd, z = f.z + f.rz * l + f.tz * dd;
+          out.push([x, f.y + (o.dy || 0) + r * rise, z, Math.atan2(-side * f.rx, -side * f.rz), (d - o.d0) / (span || 1)]);
+        }
+      }
+      return out;
+    }
+    _cheerAt(x, z, r, sec) {
+      for (let i = 0; i < this._crowds.length; i++) {
+        const c = this._crowds[i], dx = x - c.cx, dz = z - c.cz, rr = r + c.ext;
+        if (dx * dx + dz * dz < rr * rr && c.boost < sec) c.boost = sec;
+      }
+    }
+
+    // ---- item box row sparkles (one Points draw, shader animated)
+    _buildSparkles() {
+      const sp = this.itemBoxSpots; if (!sp || !sp.length) return;
+      const em = []; for (const s of sp) em.push([s.x, s.y + 1.1, s.z]);
+      this._particles({ emitters: em, count: 5, vel: [0, 0.7, 0], spread: [0.6, 0.35, 0.6], jitter: [0.9, 0.5, 0.9], life: 1.9, size: 0.62, grow: -0.4, alpha: 0.95, pow: 0.7, fadeIn: 0.25,
+        color: [0xfff4b0, 0xffffff, 0xa8e8ff, 0xffd0f4], tex: 'spark', additive: true });
+    }
+
+    _buildLife() {
+      this._finishCloth();
+      this._buildSparkles();
+      if (this._crowds.length && G.events && G.events.on) {
+        const self = this;
+        const hit = (e) => { const p = e && e.victim && e.victim.pos; if (p) self._cheerAt(self.mirror ? -p.x : p.x, p.z, 80, 2.4); };
+        const hz = (e) => { if (e && e.x !== undefined) self._cheerAt(self.mirror ? -e.x : e.x, e.z, 90, 2.2); };
+        G.events.on('itemHit', hit); G.events.on('hazardLaunched', hz);
+        this._evs.push(['itemHit', hit], ['hazardLaunched', hz]);
+      }
+    }
+    _stepLife(dt, time) {
+      this._uT.value = time;
+      // human kart positions (build space) + lap-change cheers
+      const gm = G.Game, hs = gm && gm.humans, hk = this._hk; let hn = 0;
+      if (hs) for (let i = 0; i < hs.length && hn < 16; i++) {
+        const k = hs[i] && hs[i].kart; if (!k || !k.pos) continue;
+        hk[hn * 2] = this.mirror ? -k.pos.x : k.pos.x; hk[hn * 2 + 1] = k.pos.z;
+        const lap = k.lap | 0;
+        if (this._lapSeen[hn] === undefined) this._lapSeen[hn] = lap;
+        else if (lap > this._lapSeen[hn]) { this._lapSeen[hn] = lap; this._cheerAt(hk[hn * 2], hk[hn * 2 + 1], 140, 3.5); }
+        hn++;
+      }
+      this._hn = hn;
+      const M = this._motion;
+      for (let i = 0; i < M.length; i++) {
+        const m = M[i];
+        if (m.t === 0) m.o.rotation[m.ax] = m.b + time * m.sp + m.ph;
+        else if (m.t === 1) m.o.rotation[m.ax] = m.b + Math.sin(time * m.sp + m.ph) * m.amp;
+        else if (m.t === 2) {
+          const a = time * m.sp + m.ph;
+          m.o.position.y = m.y0 + Math.sin(a) * m.amp; m.o.rotation.z = m.rz + Math.sin(a * 0.8 + 1) * m.roll; m.o.rotation.x = m.rx + Math.cos(a * 0.7) * m.roll * 0.6;
+        } else if (m.t === 4) {
+          const k = Math.sin(time * m.sp + m.ph); m.o.position.set(m.x0 + m.dx * k, m.y0 + m.dy * k, m.z0 + m.dz * k);
+        } else if (m.t === 3) this._stepBirds(m, time);
+      }
+      const B = this._blinkers;
+      for (let i = 0; i < B.length; i++) {
+        const b = B[i], u = (((time / b.per + b.ph) % 1) + 1) % 1;
+        let lit;
+        if (b.sine) lit = 0.5 + 0.5 * Math.sin(u * 6.2832); else lit = u < b.duty ? 1 : 0;
+        if (b.alt && !b.sine) { const k = b.hi; if (lit) b.c.setRGB(b.r * k, b.g * k, b.b * k); else b.c.setRGB(b.ar * k, b.ag * k, b.ab * k); }
+        else { const v = b.lo + (b.hi - b.lo) * lit; b.c.setRGB(b.r * v, b.g * v, b.b * v); }
+      }
+      const S = this._scrolls;
+      for (let i = 0; i < S.length; i++) { const s = S[i]; s.t.offset.set((time * s.u) % 1, (time * s.v) % 1); }
+      if (this._boostTex) this._boostTex.offset.y = -((time * 1.1) % 1);
+      if (this._boostMat) { const k = 0.88 + 0.12 * Math.sin(time * 9); this._boostMat.color.setRGB(k, k, k); }
+      const C = this._crowds;
+      for (let i = 0; i < C.length; i++) {
+        const c = C[i];
+        let d2 = 1e18;
+        for (let h = 0; h < hn; h++) { const dx = hk[h * 2] - c.cx, dz = hk[h * 2 + 1] - c.cz, q = dx * dx + dz * dz; if (q < d2) d2 = q; }
+        const vis = hn === 0 || d2 < (c.R + c.ext + 230) * (c.R + c.ext + 230);
+        if (c.bi.visible !== vis) c.bi.visible = c.hi.visible = vis;
+        if (!vis) continue;
+        let tgt = 0;
+        const lim = c.R + c.ext;
+        if (d2 < lim * lim) { const dd = Math.sqrt(d2) - c.ext; tgt = dd < 6 ? 1 : Math.max(0, 1 - (dd - 6) / (c.R - 6)) * 0.85; }
+        if (c.boost > 0) { c.boost -= dt; if (tgt < 1) tgt = 1; }
+        c.cheer += (tgt - c.cheer) * Math.min(1, dt * (tgt > c.cheer ? 7 : 1.4));
+        this._poseCrowd(c, time, dt);
+      }
+    }
+
     // ------------------------------------------------ v2 content hooks
     _kit() {
       if (this._kitObj) return this._kitObj;
@@ -1574,6 +2111,37 @@
           const t = new THREE.CanvasTexture(c); self._tex.push(t); return t;
         },
         get time() { return self._time; },
+        // ---- v5 liveliness helpers -------------------------------------------------------------------
+        // windy foliage: kit.mesh(batch, {wind:true}) or kit.foliage(batch, {strength, heightScale})
+        foliage(batch, o) { const m = self._mesh(batch, self._mat({ wind: Object.assign({ strength: 0.32, heightScale: 0.17 }, o || {}) }, !!(o && o.basic)), true); if (m) m.receiveShadow = true; return m; },
+        waterMat(o) { return self._waterMat(o); },
+        flowMat(kind, o) { return self._flowMat(kind, o); },
+        panel(corners, mat, rep) { return self._panel(corners, mat, rep); },
+        ribbon(d0, d1, l0, l1, dy, mat, o) { return self._ribbon(d0, d1, l0, l1, dy, mat, o); },
+        scroll(tex, du, dv) { return self._scroll(tex, du, dv); },
+        flag(x, y, z, w, h, ry, colors, o) { self._flag(x, y, z, w, h, ry, colors, o); },
+        banner(x, y, z, w, h, ry, colors, o) { self._banner(x, y, z, w, h, ry, colors, o); },
+        bunting(a, b, colors, n, size, sag) { self._bunting(a, b, colors, n, size, sag); },
+        spinner(obj, axis, speed, phase) { return self._spin(obj, axis, speed, phase); },
+        spinBatch(batch, o) { return self._spinBatch(batch, o); },
+        sway(obj, axis, amp, speed, phase) { return self._sway(obj, axis, amp, speed, phase); },
+        bob(obj, amp, speed, phase, roll) { return self._bob(obj, amp, speed, phase, roll); },
+        slide(obj, dx, dy, dz, speed, phase) { return self._slide(obj, dx, dy, dz, speed, phase); },
+        blinker(mat, period, o) { return self._blinker(mat, period, o); },
+        crowd(spots, o) { return self._crowd(spots, o); },
+        standSpots(o) { return self._standSpots(o); },
+        cheerAt(x, z, r, sec) { self._cheerAt(x, z, r, sec); },
+        particles(o) { return self._particles(o); },
+        birds(o) { return self._birds(o); },
+        prism(b, a, c, w, k) { self._prism(b, a, c, w, k); },
+        // flag pole at road distance d / lateral l flying along the road (o.flip reverses); o: {pole, pattern, dy, amp}
+        flagAt(d, l, w, h, colors, o) {
+          o = o || {}; const p = self._PD(d, l, o.dy || 0), f = self._frame(d, {}), ry = Math.atan2(f.tx, f.tz) - Math.PI / 2 + (o.flip ? Math.PI : 0);
+          self._flag(p[0], p[1], p[2], w, h, o.ry !== undefined ? o.ry : ry, colors, o);
+        },
+        // grandstand crowd along the road: standSpots(o) -> crowd(spots, o)
+        crowdStand(o) { return self._crowd(self._standSpots(o), o); },
+        lightBeam(o) { return self._lightBeam(o); },
       };
       return this._kitObj;
     }
@@ -1684,6 +2252,7 @@
         if (h._L) { this._stepLaunched(h, dt, time); continue; }
         if (h.update) h.update(dt, time);
       }
+      this._stepLife(dt, time);
       if (this.def.update) this.def.update(this, dt, time);
       if (this._padMat) { const k = 0.8 + 0.2 * Math.sin(time * 9); this._padMat.color.setRGB(k, k, k); }
       const w = this._anim.water;
@@ -1694,7 +2263,9 @@
     }
 
     dispose() {
-      for (const o of this._objs) { if (o.parent) o.parent.remove(o); }
+      if (G.events && G.events.off) for (const e of this._evs) G.events.off(e[0], e[1]);
+      this._evs.length = 0;
+      for (const o of this._objs) { if (o.parent) o.parent.remove(o); if (o.isInstancedMesh && o.dispose) o.dispose(); }
       for (const g of this._geoms) g.dispose();
       for (const m of this._mats) m.dispose();
       for (const t of this._tex) t.dispose();

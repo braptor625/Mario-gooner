@@ -214,7 +214,7 @@
         disc(b, 0, FL, 0, 240, 330, 64, sand2, 0);
         // ---- stands: tiered bowl with a crowd
         const crowd = [col(0xe8383d), col(0x2a54c8), col(0xffd23f), col(0x3fbf5a), col(0xffffff), col(0xff8a2a), col(0xb05ad8)];
-        const TIERS = 10, SEG = 72;
+        const TIERS = 10, SEG = 72, qd = [[], [], [], []];   // animated spectators on the odd tiers, one group per quadrant
         for (let k = 0; k < TIERS; k++) {
           const ri = 186 + k * 5.2, ro = ri + 5.2, y0 = FL + 4 + k * 7, y1 = y0 + 7;
           for (let s = 0; s < SEG; s++) {
@@ -226,9 +226,11 @@
           const cnt = Math.floor((TAU * (ri + 2.6)) / 6.2);
           for (let c = 0; c < cnt; c++) {
             const a = (c / cnt) * TAU + hash(k, c) * 0.01, r2 = ri + 2.6;
+            if (k & 1) { qd[Math.min(3, (a / TAU * 4) | 0)].push([Math.cos(a) * r2, y1, Math.sin(a) * r2, Math.atan2(-Math.cos(a), -Math.sin(a)), a / TAU]); continue; }
             b.box(Math.cos(a) * r2, y1, Math.sin(a) * r2, 2.2, 1.7 + hash(c, k) * 0.5, 1.8, a + Math.PI / 2, crowd[(hash(c, k + 5) * 7) | 0]);
           }
         }
+        qd.forEach((g) => kit.crowd(g, { scale: 2.1, radius: 90, period: 19, woff: 4, waveTime: 11 }));
         // podium wall (arched) between the arena and the stands
         for (let s = 0; s < SEG; s++) {
           const a = ((s + 0.5) / SEG) * TAU, r = 184;
@@ -250,7 +252,7 @@
         for (let s = 0; s < 36; s++) {
           const a = ((s + 0.5) / 36) * TAU, r = 238;
           b.box(Math.cos(a) * r, 58, Math.sin(a) * r, 0.5, 14, 0.5, 0, col(0xf2e6c6));
-          b.box(Math.cos(a) * r + 2, 69, Math.sin(a) * r, 4, 2.6, 0.2, -a, [col(0xc8302a), col(0x2a54c8), col(0xe6b422)][s % 3]);
+          kit.flag(Math.cos(a) * r, 72, Math.sin(a) * r, 4.6, 2.8, -a, [[0xc8302a, 0xf0e2c0], [0x2a54c8, 0xf0e2c0], [0xe6b422, 0xc8302a]][s % 3], { pole: 0.01 });
         }
         // ---- central domed pavilion + fountain
         for (let k = 0; k < 4; k++) disc(b, 0, FL + k * 2, 0, 0, 40 - k * 3, 36, k & 1 ? stone2 : stone, 0);
@@ -267,6 +269,7 @@
         disc(b, 0, FL + 8.4, 0, 0, 17, 32, wcol, 0);
         for (let i = 0; i < 32; i++) { const a = (i / 32) * TAU; b.box(Math.cos(a) * 18, FL + 8, Math.sin(a) * 18, 2, 2.4, 2.2, -a, stone); }
         b.frustum(0, FL + 8, 0, 3.2, 2.4, 30, 8, stone, 0);
+        kit.particles({ x: 0, y: FL + 43, z: 0, count: 80, vel: [0, 12, 0], spread: [2.6, 2.4, 2.6], life: 2.6, grav: -14, size: 1.1, alpha: 0.9, pow: 0.5, color: [0xcdf4ff, 0xffffff, 0x9fe6ff] });
         for (let k = 0; k < 3; k++) { b.frustum(0, FL + 24 + k * 6, 0, 9 - k * 2.5, 4 - k, 1.6, 12, stone, 0); b.frustum(0, FL + 25.4 + k * 6, 0, 8 - k * 2.5, 1.2, 4.2, 12, mix(wcol, [1, 1, 1], 0.4), 0); }
         kit.mesh(b);
 
@@ -294,13 +297,19 @@
           }
           sb.box(f.x, f.y + 14, f.z, 2 * wd + 4, 3, 3.6, hd, stone);
           sb.box(f.x, f.y + 17, f.z, 2 * wd + 1, 1.6, 3.2, hd, gold);
+          for (let s = -1; s <= 1; s += 2) kit.flag(f.x + f.rx * s * wd, f.y + 14.7, f.z + f.rz * s * wd, 5, 2.6, hd - Math.PI / 2, s < 0 ? [0xb7432e, 0xe6b422] : [0x2a54c8, 0xe6b422], { pole: 4 });
           sb.box(f.x, f.y + 11.6, f.z, 2 * wd - 4, 2.4, 3.2, hd, col(0xb7432e));
         }
+        const tor = [];
         for (let d = 24; d < L; d += 60) {
           const f = kit.frame(d), s = ((d / 60) | 0) & 1 ? 1 : -1, l = s * (f.halfWidth + 1.6);
           sb.box(f.x + f.rx * l, f.y, f.z + f.rz * l, 0.7, 2.2, 0.7, 0, stone2);
           sb.blob(f.x + f.rx * l, f.y + 2.8, f.z + f.rz * l, 0.8, 0.9, 0.8, col(0xff9a2a), 0);
+          tor.push([f.x + f.rx * l, f.y + 3.2, f.z + f.rz * l]);
         }
+        kit.particles({ emitters: tor, count: 8, vel: [0, 1.8, 0], spread: [0.25, 0.5, 0.25], life: 0.85, size: 1.1, grow: -0.5, alpha: 0.95, color: [0xffa030, 0xffd060, 0xff6a20], additive: true });
+        kit.birds({ cx: 0, cz: 0, y: 95, radius: 125, count: 9, speed: 0.09, size: 1.8 });
+        for (let s = -1; s <= 1; s += 2) kit.crowdStand({ d0: L - 40, d1: L + 55, side: s, l0: 12 + 1.4, rows: 2, gap: 1.2, rise: 0, step: 2.2, scale: 1.1, radius: 55, colors: [0xe8383d, 0x2a54c8, 0xffd23f, 0x3fbf5a, 0xffffff, 0xb05ad8] });
         // ramp lips + warning chevrons at the two gaps
         for (const gd of [GAP1, GAP2]) for (const [e, dir] of [[gd + 3, 1], [gd + 13, -1]]) {
           const f = kit.frame(e), hd = Math.atan2(f.tx, f.tz);
@@ -353,24 +362,24 @@
       const jit = (c, r) => mul(c, 0.86 + r() * 0.28);
       const greens = [col(0x2f8f3c), col(0x3da34a), col(0x1f6f35), col(0x58b84a), col(0x2a7f45)];
       const trunkC = col(0x6a4a2a), palmC = col(0x8a6a3a), stoneC = col(0x8d8a78), stoneD = col(0x6f6d5e), mossC = col(0x5a7d3a), bone = col(0xeee2c2);
-      const b = new kit.Batch();
+      const b = new kit.Batch(), jf = new kit.Batch();   // jf: jungle foliage (wind-swayed)
 
       // ---- dense jungle
       const M = 17;
       kit.scatter(700, 1, 55, M - 1, (x, z, i, r) => {
         const s = 0.8 + r() * 1.1, tp = r();
         if (tp < 0.45) {
-          b.frustum(x, gy, z, 0.9 * s, 0.5 * s, 6 * s, 6, trunkC, 0);
-          b.blob(x, gy + 7.4 * s, z, 3.9 * s, 2.9 * s, 3.9 * s, jit(greens[(r() * 5) | 0], r), 0);
-          b.blob(x + 2.1 * s, gy + 6.2 * s, z + 1.3 * s, 2.7 * s, 2.1 * s, 2.7 * s, jit(greens[(r() * 5) | 0], r), 0);
-          b.blob(x - 1.7 * s, gy + 6.6 * s, z - 1.0 * s, 2.5 * s, 2.0 * s, 2.5 * s, jit(greens[(r() * 5) | 0], r), 0);
+          jf.frustum(x, gy, z, 0.9 * s, 0.5 * s, 6 * s, 6, trunkC, 0);
+          jf.blob(x, gy + 7.4 * s, z, 3.9 * s, 2.9 * s, 3.9 * s, jit(greens[(r() * 5) | 0], r), 0);
+          jf.blob(x + 2.1 * s, gy + 6.2 * s, z + 1.3 * s, 2.7 * s, 2.1 * s, 2.7 * s, jit(greens[(r() * 5) | 0], r), 0);
+          jf.blob(x - 1.7 * s, gy + 6.6 * s, z - 1.0 * s, 2.5 * s, 2.0 * s, 2.5 * s, jit(greens[(r() * 5) | 0], r), 0);
         } else if (tp < 0.8) {
-          b.frustum(x, gy, z, 0.45 * s, 0.3 * s, 9 * s, 5, palmC, 0);
+          jf.frustum(x, gy, z, 0.45 * s, 0.3 * s, 9 * s, 5, palmC, 0);
           const a0 = r() * 6;
-          for (let k = 0; k < 6; k++) frond(b, x, gy + 9 * s, z, a0 + (k * TAU) / 6, 4.6 * s, 0.9 * s, jit(greens[(r() * 5) | 0], r));
+          for (let k = 0; k < 6; k++) frond(jf, x, gy + 9 * s, z, a0 + (k * TAU) / 6, 4.6 * s, 0.9 * s, jit(greens[(r() * 5) | 0], r));
         } else {
-          for (let k = 0; k < 4; k++) b.blob(x + (r() - 0.5) * 3 * s, gy + 0.9 * s, z + (r() - 0.5) * 3 * s, 1.6 * s, 1.2 * s, 1.6 * s, jit(greens[(r() * 5) | 0], r), 0);
-          if (r() < 0.5) b.box(x, gy + 1.2 * s, z, 0.4, 0.4, 0.4, 0, [col(0xff5a6a), col(0xffe14a), col(0xff9ae0)][(r() * 3) | 0]);
+          for (let k = 0; k < 4; k++) jf.blob(x + (r() - 0.5) * 3 * s, gy + 0.9 * s, z + (r() - 0.5) * 3 * s, 1.6 * s, 1.2 * s, 1.6 * s, jit(greens[(r() * 5) | 0], r), 0);
+          if (r() < 0.5) jf.box(x, gy + 1.2 * s, z, 0.4, 0.4, 0.4, 0, [col(0xff5a6a), col(0xffe14a), col(0xff9ae0)][(r() * 3) | 0]);
         }
       });
       kit.scatter(40, 2, 40, M - 3, (x, z, i, r) => { const s = 1 + r() * 2.4; b.blob(x, gy + 0.3 * s, z, 1.8 * s, 1.1 * s, 1.5 * s, jit(r() < 0.5 ? stoneC : mossC, r), 0); });
@@ -379,10 +388,10 @@
         const f = kit.frame(d), s = ((d / 34) | 0) & 1 ? 1 : -1, l = s * (f.halfWidth + 9 + rng() * 5), p = kit.at(d, l, 0);
         if (d > DR.cave[0] - 10 && d < DR.cave[1] + 10) continue;
         if (d > DR.dino - 40 && d < DR.dino + 40) continue;
-        b.frustum(p[0], gy, p[2], 1.8, 1.1, p[1] - gy + 8, 7, trunkC, 0);
-        b.blob(p[0], p[1] + 17, p[2], 8.5, 4.2, 8.5, jit(greens[2], rng), 1);
-        b.blob(p[0] + 4, p[1] + 15, p[2] + 3, 6, 3, 6, jit(greens[0], rng), 0);
-        for (let v = 0; v < 3; v++) b.box(p[0] + (rng() - 0.5) * 9, p[1] + 8, p[2] + (rng() - 0.5) * 9, 0.12, 8 + rng() * 4, 0.12, 0, greens[3]);
+        jf.frustum(p[0], gy, p[2], 1.8, 1.1, p[1] - gy + 8, 7, trunkC, 0);
+        jf.blob(p[0], p[1] + 17, p[2], 8.5, 4.2, 8.5, jit(greens[2], rng), 1);
+        jf.blob(p[0] + 4, p[1] + 15, p[2] + 3, 6, 3, 6, jit(greens[0], rng), 0);
+        for (let v = 0; v < 3; v++) jf.box(p[0] + (rng() - 0.5) * 9, p[1] + 8, p[2] + (rng() - 0.5) * 9, 0.12, 8 + rng() * 4, 0.12, 0, greens[3]);
       }
       kit.farScatter(22, 160, (x, z, r) => {
         const h = 60 + r() * 90, R0 = 50 + r() * 60, c = mix(col(0x3a7a4a), col(0x5a8f5a), r());
@@ -391,6 +400,7 @@
       });
 
       kit.mesh(b);
+      kit.foliage(jf, { strength: 0.4, heightScale: 0.14 });
       // ---- stone walls & log fences along the road (bridge stretch left open)
       const wb = new kit.Batch();
       const sh = 3;
@@ -426,7 +436,13 @@
       // entry gate to the start straight
       { const f = kit.frame(L - 10), hd = Math.atan2(f.tx, f.tz), wd = f.halfWidth + 5;
         for (let s = -1; s <= 1; s += 2) { const x = f.x + f.rx * s * wd, z = f.z + f.rz * s * wd; rb.box(x, f.y - 1, z, 4, 15, 4, hd, stoneC); rb.box(x, f.y + 14, z, 5, 1.2, 5, hd, stoneD); }
-        rb.box(f.x, f.y + 14, f.z, 2 * wd + 2, 3, 4.2, hd, stoneC); rb.box(f.x, f.y + 17, f.z, 2 * wd - 4, 2, 3.6, hd, mossC); }
+        rb.box(f.x, f.y + 14, f.z, 2 * wd + 2, 3, 4.2, hd, stoneC); rb.box(f.x, f.y + 17, f.z, 2 * wd - 4, 2, 3.6, hd, mossC);
+        for (let s = -1; s <= 1; s += 2) kit.flag(f.x + f.rx * s * wd, f.y + 14.6, f.z + f.rz * s * wd, 4.6, 2.6, hd - Math.PI / 2, s < 0 ? [0xd8cfa6, 0x4d7a35] : [0xc8502d, 0xd8cfa6], { pole: 4.2 });
+        kit.banner(f.x, f.y + 9.2, f.z, 7, 5, hd, [0x4d7a35, 0xd8cfa6, 0xc8502d], { pattern: 'vstripes' }); }
+      for (let s = -1; s <= 1; s += 2) kit.crowdStand({ d0: L - 40, d1: L + 55, side: s, l0: 11 + 1.5, rows: 2, gap: 1.2, rise: 0, step: 2.3, scale: 1.15, radius: 55, colors: [0x8a5a2b, 0x4d7a35, 0xc8502d, 0xd8cfa6, 0x2f78d0], skin: [0xc08a58, 0xa8744a, 0x7ac66a, 0xf6d2b0] });
+      { let ccx = 0, ccz = 0, cn = 0; for (let i = 0; i < kit.N; i += 8) { ccx += kit.px[i]; ccz += kit.pz[i]; cn++; }
+        kit.birds({ cx: ccx / cn, cz: ccz / cn, y: 78, radius: 170, count: 4, speed: 0.07, size: 3.4, body: 0x6a4a2a, wing: 0xc08a58 });
+        kit.birds({ cx: ccx / cn + 120, cz: ccz / cn - 60, y: 58, radius: 100, count: 7, speed: -0.11, size: 1.3, body: 0xd8383d, wing: 0x2f9a3a }); }
       kit.mesh(rb);
 
       // ---- cave tunnel
@@ -445,7 +461,8 @@
         const f = kit.frame(d), hd = Math.atan2(f.tx, f.tz), wd = f.halfWidth + 4.6;
         for (let s = -1; s <= 1; s += 2) { const x = f.x + f.rx * s * wd, z = f.z + f.rz * s * wd; cb.box(x, f.y - 2, z, 3.2, 8, 3.2, hd, rock[2]); cb.blob(x, f.y + 6.5, z, 2.4, 2, 2.4, mossC, 0); }
       }
-      kit.mesh(cb); kit.mesh(gl, {}, true);
+      kit.mesh(cb);
+      { const gm = kit.mesh(gl, {}, true); if (gm) kit.blinker(gm.material, 3.2, { mode: 'sine', lo: 0.45 }); }   // glow crystals pulse
 
       // ---- rope bridge over the river
       const bb = new kit.Batch();
@@ -472,7 +489,7 @@
           const e0 = Math.min(1, (d - DR.bridge[0] + 14) / 10, (DR.bridge[1] + 14 - d) / 10), hwid = 46 * Math.max(0.35, e0);
           wbk.quad([fa.x - fa.rx * hwid, wy, fa.z - fa.rz * hwid], [fa.x + fa.rx * hwid, wy, fa.z + fa.rz * hwid], [fb.x + fb.rx * hwid, wy, fb.z + fb.rz * hwid], [fb.x - fb.rx * hwid, wy, fb.z - fb.rz * hwid], ((d / 4) | 0) & 1 ? wc : wc2);
         }
-        track._drWater = kit.mesh(wbk, { transparent: true, opacity: 0.9 }); }
+        const wmsh = new THREE.Mesh(kit.trackGeom(wbk.build()), kit.waterMat({ color: 0x3a9fd8, deep: 0x1c6a9c, opacity: 0.9 })); wmsh.frustumCulled = false; kit.add(wmsh); track._drWater = wmsh; }
 
       // ---- waterfall + pool beside the ford
       { const f = kit.frame(DR.fall), hd = Math.atan2(f.tx, f.tz), s = 1, cl = s * (f.halfWidth + 46);
@@ -483,24 +500,26 @@
         kit.mesh(cb2);
         const fx = f.x + f.rx * (f.halfWidth + 22), fz = f.z + f.rz * (f.halfWidth + 22);
         const pg = kit.trackGeom(new THREE.CircleGeometry(19, 24)); pg.rotateX(-Math.PI / 2);
-        const pm = kit.trackMat(new THREE.MeshPhongMaterial({ color: 0x5cc7ee, transparent: true, opacity: 0.88, shininess: 60, specular: 0xffffff }));
+        const pm = kit.waterMat({ color: 0x5cc7ee, opacity: 0.88 });
         const pool = new THREE.Mesh(pg, pm); pool.position.set(fx + f.rx * 6, gy + 0.2, fz + f.rz * 6); kit.add(pool);
         // falling water curtains
-        const wm1 = kit.trackMat(new THREE.MeshBasicMaterial({ color: 0xe8f8ff, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
-        const wm2 = kit.trackMat(new THREE.MeshBasicMaterial({ color: 0x9fdcff, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
+        const wm1 = kit.flowMat('water', { speed: [0, 1.7], repeat: [1, 3], opacity: 0.85, fallback: 0xe8f8ff });
+        const wm2 = kit.flowMat('water', { speed: [0, 2.5], repeat: [1, 4], opacity: 0.65, color: 0xcfeeff, fallback: 0x9fdcff });
         const topP = f.halfWidth + 31;
         const curt = (dl, w, mat) => {
           const g = new THREE.BufferGeometry(); const y0 = gy + 0.3, y1 = gy + 38;
           const A = kit.at(DR.fall + dl - w / 2, topP, 0), B = kit.at(DR.fall + dl + w / 2, topP, 0);
           g.setAttribute('position', new THREE.Float32BufferAttribute([A[0], y1, A[2], B[0], y1, B[2], B[0], y0, B[2], A[0], y0, A[2]], 3));
+          g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 1, 1, 1, 1, 0, 0, 0], 2));
           g.setIndex([0, 1, 2, 0, 2, 3]); g.computeVertexNormals(); kit.trackGeom(g);
-          const m = new THREE.Mesh(g, mat); kit.add(m); return m;
+          const m = new THREE.Mesh(g, mat); m.frustumCulled = false; kit.add(m); return m;
         };
         curt(0, 9, wm1); curt(-2.5, 3, wm2); curt(3, 3.5, wm2);
         track._drFall = [wm1, wm2];
         const sp = new kit.Batch();
         for (let k = 0; k < 9; k++) { const q = kit.at(DR.fall + (k - 4) * 1.3, topP - 1.5 - (k % 3) * 1.2, 0); sp.blob(q[0], gy + 1.2 + (k % 2), q[2], 2.2, 1.4, 2.2, [1, 1, 1], 0); }
         kit.mesh(sp, {}, true);
+        { const q = kit.at(DR.fall, topP - 2, 0); kit.particles({ x: q[0], y: gy + 1.5, z: q[2], count: 40, vel: [0, 2.6, 0], spread: [3, 1.2, 3], jitter: [5, 0.5, 5], life: 2.3, size: 4.2, grow: 1.6, alpha: 0.4, pow: 1.1, color: [0xffffff, 0xdff6ff] }); }   // spray at the foot of the falls
       }
 
       // ---- geyser vents on the road, dino body, background dinos
@@ -519,16 +538,25 @@
       for (let k = -1; k <= 1; k++) dc(DR.dino + k * 6.5, 0, 25, 11.5, 9, 11.5, k === 0 ? skin2 : skin);
       for (let k = -2; k <= 2; k++) { const p = kit.at(DR.dino + k * 5.2, 0, 34); db.frustum(p[0], p[1], p[2], 1.8, 0, 4.2, 5, col(0x4d7a32), k); }
       for (let k = 0; k < 7; k++) dc(DR.dino - 9 + hash(k, 1) * 19, (hash(k, 2) - 0.5) * 14, 27 + hash(k, 3) * 6, 1.6, 1.2, 1.6, spot);
-      // neck sweeping up and out over the left side, head looking down the road
-      for (let k = 0; k < 9; k++) { const t = k / 8, r = 6.5 - t * 3.2; dc(DR.dino + 12 + t * 26, -t * 15, 27 + Math.sin(t * 1.5) * 24 + t * 6, r, r, r, k & 1 ? skin : skin2); }
-      { const hp = kit.at(DR.dino + 40, -16, 55);
-        db.blob(hp[0], hp[1], hp[2], 6.2, 4.4, 6.8, skin2, 1); const sn = kit.at(DR.dino + 45.5, -16.5, 53.6); db.blob(sn[0], sn[1], sn[2], 3.6, 2.6, 3.8, skin, 1);
-        const e1 = kit.at(DR.dino + 40.5, -21.5, 56.5), e2 = kit.at(DR.dino + 40.5, -10.5, 56.5);
-        db.blob(e1[0], e1[1], e1[2], 1.5, 1.5, 1.5, [1, 1, 1], 0); db.blob(e2[0], e2[1], e2[2], 1.5, 1.5, 1.5, [1, 1, 1], 0);
-        const q1 = kit.at(DR.dino + 41.7, -21.6, 56.4), q2 = kit.at(DR.dino + 41.7, -10.4, 56.4);
-        db.blob(q1[0], q1[1], q1[2], 0.8, 0.8, 0.8, [0.05, 0.05, 0.05], 0); db.blob(q2[0], q2[1], q2[2], 0.8, 0.8, 0.8, [0.05, 0.05, 0.05], 0); }
-      // tail
-      for (let k = 0; k < 8; k++) { const t = k / 7, r = 6.2 - t * 4.8; dc(DR.dino - 13 - t * 34, t * 14, 22 - t * 9, r, r * 0.9, r, k & 1 ? skin : skin2); }
+      // neck sweeping up and out over the left side, head looking down the road (separate mesh: idle sway)
+      {
+        const piv = kit.at(DR.dino + 12, 0, 27), nk = new kit.Batch();
+        const dn = (d, lat, y, rx, ry, rz, c) => { const p = kit.at(d, lat, y); nk.blob(p[0] - piv[0], p[1] - piv[1], p[2] - piv[2], rx, ry, rz, c, 1); };
+        for (let k = 0; k < 9; k++) { const t = k / 8, r = 6.5 - t * 3.2; dn(DR.dino + 12 + t * 26, -t * 15, 27 + Math.sin(t * 1.5) * 24 + t * 6, r, r, r, k & 1 ? skin : skin2); }
+        const hp = kit.at(DR.dino + 40, -16, 55);
+        nk.blob(hp[0] - piv[0], hp[1] - piv[1], hp[2] - piv[2], 6.2, 4.4, 6.8, skin2, 1); dn(DR.dino + 45.5, -16.5, 53.6, 3.6, 2.6, 3.8, skin);
+        dn(DR.dino + 40.5, -21.5, 56.5, 1.5, 1.5, 1.5, [1, 1, 1]); dn(DR.dino + 40.5, -10.5, 56.5, 1.5, 1.5, 1.5, [1, 1, 1]);
+        dn(DR.dino + 41.7, -21.6, 56.4, 0.8, 0.8, 0.8, [0.05, 0.05, 0.05]); dn(DR.dino + 41.7, -10.4, 56.4, 0.8, 0.8, 0.8, [0.05, 0.05, 0.05]);
+        const g = new THREE.Group(); g.position.set(piv[0], piv[1], piv[2]);
+        const m = new THREE.Mesh(kit.trackGeom(nk.build()), kit.mat({})); m.frustumCulled = false; g.add(m); kit.add(g);
+        kit.sway(g, 'y', 0.13, 0.5, 0); kit.sway(g, 'z', 0.04, 0.9, 1.3);
+        // tail swishing
+        const tp = kit.at(DR.dino - 13, 0, 22), tk = new kit.Batch();
+        for (let k = 0; k < 8; k++) { const t = k / 7, r = 6.2 - t * 4.8, q = kit.at(DR.dino - 13 - t * 34, t * 14, 22 - t * 9); tk.blob(q[0] - tp[0], q[1] - tp[1], q[2] - tp[2], r, r * 0.9, r, k & 1 ? skin : skin2, 1); }
+        const tg = new THREE.Group(); tg.position.set(tp[0], tp[1], tp[2]);
+        const tm = new THREE.Mesh(kit.trackGeom(tk.build()), kit.mat({})); tm.frustumCulled = false; tg.add(tm); kit.add(tg);
+        kit.sway(tg, 'y', 0.1, 0.7, 2);
+      }
       // hips (leg tops are hidden inside the body, these are the thighs)
       for (const row of DR.rows) for (const lat of [-7, 0, 7]) dc(row, lat, 19.5, 3.9, 2.6, 3.9, skin);
       kit.mesh(db);
@@ -651,6 +679,17 @@
     decorate(track, kit) {
       const col = kit.col, mul = kit.mul, mix = kit.mix, rng = kit.rng, L = kit.length, gy = kit.groundY;
       const basalt = col(0x34303a), basalt2 = col(0x45414c), brick = col(0x5a5662), brick2 = col(0x4a4652), lavaC = col(0xff6a1a), gold = col(0xe0a82a), red = col(0x9a1c14);
+      const flames = [];   // torch / brazier flame emitters (one particle draw at the end)
+      // ---- flowing lava sheet over the ground plane (scrolling molten texture, pulsing glow)
+      {
+        const lg = kit.trackGeom(new THREE.PlaneGeometry(2600, 2600)); lg.rotateX(-Math.PI / 2);
+        const lm = kit.flowMat('lava', { speed: [0.014, 0.009], repeat: [110, 110], color: 0xffd0a0, fallback: 0xff5a14 });
+        const lp = new THREE.Mesh(lg, lm); lp.position.set(kit.px[0], gy + 0.05, kit.pz[0]); lp.frustumCulled = false; kit.add(lp);
+        kit.blinker(lm, 3.4, { mode: 'sine', lo: 0.78 });
+        // heat embers rising off the lava all over the course
+        const em = []; for (let k = 0; k < 14; k++) em.push([kit.px[0] + (rng() - 0.5) * 520, gy + 0.3, kit.pz[0] + (rng() - 0.5) * 520]);
+        kit.particles({ emitters: em, count: 22, vel: [0.3, 5, 0.2], spread: [0.8, 2.2, 0.8], jitter: [60, 0, 60], life: 5.5, size: 0.9, grow: -0.5, alpha: 0.9, pow: 0.6, wob: 2.2, color: [0xff8a2a, 0xffc040, 0xff5a1a], additive: true });
+      }
       // ---- sky: dark gradient dome + volcano silhouettes + embers (drawn over the engine's default backdrop)
       { const geo = kit.trackGeom(new THREE.SphereGeometry(292, 20, 14)), pos = geo.attributes.position, cc = new Float32Array(pos.count * 3);
         const top = col(0x07040c), mid = col(0x24080e), bot = col(0x7a2208);
@@ -721,7 +760,7 @@
         for (let k = 0; k < 10; k++) { const a = (k / 10) * TAU; bb.box(p[0] + Math.cos(a) * 7.6, p[1] + 9.8 + sy, p[2] + Math.sin(a) * 7.6, 1.8, 1.6, 1.8, -a, brick); }
         bb.frustum(p[0], p[1] + 8.5 + sy, p[2], 6.4, 0, 9, 10, red, 0);
         bb.frustum(p[0], p[1] + 17.4 + sy, p[2], 0.15, 0.15, 4, 4, col(0xcccccc), 0);
-        bb.box(p[0] + 1.2, p[1] + 20 + sy, p[2], 2.4, 1.4, 0.15, 0, red);
+        kit.flag(p[0], p[1] + 21.4 + sy, p[2], 4.2, 2.2, (d * 0.37) % 6.28, [0xc8201a, 0x2a2a30], { pole: 0.01 });
         const w2 = kit.at(d - s * 0, l - s * 7.4, 5); bb.box(w2[0], w2[1], w2[2], 1.6, 1.4, 1.6, 0, col(0xffb040));
       };
       for (const dd of [LF.bridge[0] - 4, LF.bridge[1] + 4]) { tower(dd, -1, 0); tower(dd, 1, 0); }
@@ -741,7 +780,8 @@
         hb.box(p[0], p[1] - 1, p[2], 2.6, 16, 2.6, hd, brick); hb.box(p[0], p[1] + 14.6, p[2], 3.4, 1.2, 3.4, hd, brick2);
         tb.box(p[0] - f.rx * s * 1.7, p[1] + 5, p[2] - f.rz * s * 1.7, 0.5, 0.9, 0.5, 0, col(0x222222));
         tb.blob(p[0] - f.rx * s * 1.7, p[1] + 6.2, p[2] - f.rz * s * 1.7, 0.6, 0.9, 0.6, col(0xffa030), 0);
-        const q = kit.at(d + 8, s * (f.halfWidth + 1.8), 12); hb.box(q[0], q[1] - 4, q[2], 0.2, 8, 2.4, hd, s < 0 ? red : col(0x20203a));
+        flames.push([p[0] - f.rx * s * 1.7, p[1] + 6.8, p[2] - f.rz * s * 1.7]);
+        const q = kit.at(d + 8, s * (f.halfWidth + 1.8), 12); kit.banner(q[0], q[1] - 4, q[2], 2.6, 8, hd - Math.PI / 2, s < 0 ? [0x9a1c14, 0xe0a82a] : [0x20203a, 0xe0a82a], { pattern: 'vstripes', amp: 0.18 });
       }
       for (const dd of [LF.hall[0] + 1, LF.hall[1] - 1]) {
         const f = kit.frame(dd), hd = Math.atan2(f.tx, f.tz), wd = f.halfWidth + 4;
@@ -771,7 +811,8 @@
       kit.mesh(sb);
       // lava pits / braziers beside the statue
       const bz = new kit.Batch();
-      for (const dd of [-14, 14]) { const p = kit.at(sd + dd, kit.frame(sd).halfWidth + 3.5, 0); bz.frustum(p[0], p[1] - 0.6, p[2], 1.0, 1.5, 2.2, 6, basalt2, 0); bz.blob(p[0], p[1] + 2.4, p[2], 1.3, 1.5, 1.3, col(0xff7a1a), 0); }
+      for (const dd of [-14, 14]) { const p = kit.at(sd + dd, kit.frame(sd).halfWidth + 3.5, 0); bz.frustum(p[0], p[1] - 0.6, p[2], 1.0, 1.5, 2.2, 6, basalt2, 0); bz.blob(p[0], p[1] + 2.4, p[2], 1.3, 1.5, 1.3, col(0xff7a1a), 0); flames.push([p[0], p[1] + 3.2, p[2]]); }
+      if (track._lfMouth) flames.push([track._lfMouth[0], track._lfMouth[1], track._lfMouth[2]]);
       kit.mesh(bz, {}, true);
 
       // ---- central keep + corner towers (inside the loop)
@@ -806,6 +847,7 @@
         const f = kit.frame(d), s = ((d / 38) | 0) & 1 ? 1 : -1, l = s * (f.halfWidth + 1.8);
         tb2.box(f.x + f.rx * l, f.y, f.z + f.rz * l, 0.9, 3.3, 0.9, 0, basalt2); tb2.box(f.x + f.rx * l, f.y + 3.3, f.z + f.rz * l, 1.5, 0.5, 1.5, 0, basalt);
         tb3.blob(f.x + f.rx * l, f.y + 4.3, f.z + f.rz * l, 0.7, 1.1, 0.7, col(0xffb030), 0);
+        flames.push([f.x + f.rx * l, f.y + 4.9, f.z + f.rz * l]);
       }
       kit.mesh(tb2); kit.mesh(tb3, {}, true);
       // ---- final jump: crumbled lips + ember posts
@@ -813,6 +855,9 @@
       for (const e of [LF.gap + 3, LF.gap + 13]) { const f = kit.frame(e), hd = Math.atan2(f.tx, f.tz); jb.box(f.x, f.y - 0.5, f.z, 2 * f.halfWidth + 1.6, 0.7, 1.3, hd, red);
         for (let s = -1; s <= 1; s += 2) { const l = s * (f.halfWidth + 0.9); jb.box(f.x + f.rx * l, f.y - 0.5, f.z + f.rz * l, 1.5, 5, 1.5, hd, basalt2); jb.blob(f.x + f.rx * l, f.y + 5.4, f.z + f.rz * l, 0.9, 0.9, 0.9, col(0xff8a2a), 0); } }
       kit.mesh(jb);
+      kit.particles({ emitters: flames, count: 7, vel: [0, 2.0, 0], spread: [0.25, 0.6, 0.25], life: 0.85, size: 1.3, grow: -0.5, alpha: 0.95, color: [0xffa030, 0xffd060, 0xff6a20], additive: true });
+      // smoke from the keep and a smouldering crater plume
+      if (kr > 12) kit.particles({ x: kxz[0], y: kg + 56 + kr * 0.9, z: kxz[1], count: 22, vel: [3, 5, 1], spread: [1, 1.2, 1], life: 8, size: 12, grow: 2.2, alpha: 0.45, pow: 1.1, wob: 3, color: [0x2a2630, 0x3a3640, 0x4a4650] });
       // fire-bar pivots
       const pb = new kit.Batch();
       for (const [d] of LF.bars) { const p = kit.at(d, 0, 0); pb.frustum(p[0], p[1], p[2], 1.2, 1.0, 1.5, 8, basalt2, 0); }
@@ -968,13 +1013,15 @@
       // ---- lit decor: planets, asteroids, crystals
       const b = new kit.Batch();
       const pcol = [0xff7ab8, 0x5fc8ff, 0xffb347, 0x9a7cf0, 0x6fe0a8, 0xf26b6b];
-      for (let n = 0; n < 9; n++) {
+      for (let n = 0; n < 9; n++) {   // planets turn slowly on their axes (rings / moons ride along)
+        const pb = new kit.Batch();
         const s = 22 + rng() * 38, a = rng() * TAU, dist = rad + 160 + rng() * 260;
         const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist, y = -20 + rng() * 110, c = col(pcol[n % 6]);
-        b.blob(x, y, z, s, s, s, c, 2);
-        b.blob(x + s * 0.3, y + s * 0.35, z + s * 0.4, s * 0.55, s * 0.4, s * 0.55, kit.mul(c, 1.18), 1);
-        if (n % 3 === 0) disc(b, x, y, z, s * 1.35, s * 1.9, 28, kit.mix(c, [1, 1, 1], 0.5), 0);
-        if (n % 3 === 1) b.blob(x + s * 1.9, y + s * 0.5, z, s * 0.28, s * 0.28, s * 0.28, kit.mix(c, [1, 1, 1], 0.3), 1);
+        pb.blob(0, 0, 0, s, s, s, c, 2);
+        pb.blob(s * 0.3, s * 0.35, s * 0.4, s * 0.55, s * 0.4, s * 0.55, kit.mul(c, 1.18), 1);
+        if (n % 3 === 0) disc(pb, 0, 0, 0, s * 1.35, s * 1.9, 28, kit.mix(c, [1, 1, 1], 0.5), 0);
+        if (n % 3 === 1) pb.blob(s * 1.9, s * 0.5, 0, s * 0.28, s * 0.28, s * 0.28, kit.mix(c, [1, 1, 1], 0.3), 1);
+        kit.spinBatch(pb, { x, y, z, axis: 'y', speed: 0.05 + (n % 4) * 0.025 });
       }
       for (let n = 0; n < 170; n++) {
         const i = (rng() * kit.N) | 0, side = rng() < 0.5 ? -1 : 1, off = kit.hw[i] + 14 + rng() * 120;
@@ -988,15 +1035,15 @@
       }
       kit.mesh(b);
       // ---- glowing (unlit) decor: neon hoops, pylons, helix core
-      const g = new kit.Batch();
-      for (let k = 0; k < 9; k++) arcBand(kit, g, L * (0.045 + k * 0.105) + (k % 2) * 13, 15.4, 17.4, 1.4, neon[k % neon.length], -0.12, Math.PI + 0.12, 24, 0);
+      const g = new kit.Batch(), hoopB = [new kit.Batch(), new kit.Batch(), new kit.Batch()], pylB = [new kit.Batch(), new kit.Batch()];
+      for (let k = 0; k < 9; k++) arcBand(kit, hoopB[k % 3], L * (0.045 + k * 0.105) + (k % 2) * 13, 15.4, 17.4, 1.4, neon[k % neon.length], -0.12, Math.PI + 0.12, 24, 0);
       // light pylons along the edges
       for (let d = 30; d < L - 20; d += 36) {
         const f = kit.frame(d);
         for (let s = -1; s <= 1; s += 2) {
-          const l = s * (f.halfWidth + 1.3), c = neon[((d / 36) | 0) % neon.length];
-          g.box(f.x + f.rx * l, f.y, f.z + f.rz * l, 0.5, 2.6, 0.5, 0, kit.mul(c, 0.7));
-          g.blob(f.x + f.rx * l, f.y + 3.0, f.z + f.rz * l, 0.7, 0.7, 0.7, c, 0);
+          const l = s * (f.halfWidth + 1.3), c = neon[((d / 36) | 0) % neon.length], pb2 = pylB[((d / 36) | 0) & 1];
+          pb2.box(f.x + f.rx * l, f.y, f.z + f.rz * l, 0.5, 2.6, 0.5, 0, kit.mul(c, 0.7));
+          pb2.blob(f.x + f.rx * l, f.y + 3.0, f.z + f.rz * l, 0.7, 0.7, 0.7, c, 0);
         }
       }
       // spiral core: glowing column + level rings at the centre of the helix
@@ -1006,6 +1053,15 @@
       g.frustum(hx, hy0 - 22, hz, 2.6, 2.2, hy1 - hy0 + 60, 10, col(0x66f2ff), 0);
       for (let y = hy0 - 10, k = 0; y < hy1 + 24; y += 12, k++) disc(g, hx, y, hz, 3, 7.5, 20, neon[k % neon.length], 0);
       kit.mesh(g, {}, true);
+      hoopB.forEach((hb2, i) => { const m = kit.mesh(hb2, {}, true); if (m) kit.blinker(m.material, 2.4, { duty: 0.6, phase: i / 3, lo: 0.3 }); });   // hoops chase around
+      pylB.forEach((pb2, i) => { const m = kit.mesh(pb2, {}, true); if (m) kit.blinker(m.material, 1.6, { duty: 0.5, phase: i * 0.5, lo: 0.35 }); });
+      // searchlights sweeping from the helix core, fireworks all around, twinkling stardust along the ribbon
+      kit.lightBeam({ x: hx, y: hy1 + 34, z: hz, len: 220, width: 9, speed: 0.3, tilt: 0.55, count: 3, color: 0xff9af0, opacity: 0.5 });
+      kit.lightBeam({ x: hx, y: hy0 - 6, z: hz, len: 180, width: 7, speed: -0.45, tilt: 0.5, count: 2, color: 0x7af2ff, opacity: 0.5 });
+      { const em = []; for (let k = 0; k < 9; k++) { const a = k * 0.7 + 0.4, r = rad + 120 + (k % 3) * 70; em.push([cx + Math.cos(a) * r, 40 + (k % 4) * 30, cz + Math.sin(a) * r]); }
+        kit.particles({ emitters: em, count: 70, sphere: 28, life: 7, win: 0.3, grav: -7, size: 3.2, grow: -0.5, alpha: 1, pow: 0.6, fadeIn: 0.04, color: [0xff4060, 0x40d0ff, 0xffe040, 0x70ff70, 0xff80ff, 0xffa030], burst: true, tex: 'spark', additive: true });
+        const sd = []; for (let d = 20; d < L; d += 55) { const f = kit.frame(d); sd.push([f.x, f.y + 2.2, f.z]); }
+        kit.particles({ emitters: sd, count: 6, vel: [0, 1.2, 0], spread: [1.6, 0.5, 1.6], jitter: [10, 1.5, 10], life: 2.4, size: 1.1, alpha: 0.9, pow: 0.7, fadeIn: 0.3, color: [0xff6ad5, 0x66f2ff, 0xffe066, 0xffffff], tex: 'spark', additive: true }); }
       // ---- lip beacons around the big jump
       const jb = new kit.Batch();
       for (const dd of [1608, 1625]) { const f = kit.frame(dd); for (let s = -1; s <= 1; s += 2) { const l = s * (f.halfWidth - 0.6); jb.box(f.x + f.rx * l, f.y, f.z + f.rz * l, 0.7, 5, 0.7, 0, neon[1]); jb.blob(f.x + f.rx * l, f.y + 5.4, f.z + f.rz * l, 0.9, 0.9, 0.9, neon[2], 0); } }
