@@ -403,6 +403,43 @@ kbd {
 .pos[data-p="1"] { --pc2: #ffd21f; } .pos[data-p="2"] { --pc2: #dbe6f5; } .pos[data-p="3"] { --pc2: #ff9a4a; } .pos[data-p="4"] { --pc2: #b58cff; }
 .pof { font: 900 calc(var(--u) * 1.2) var(--f-body); letter-spacing: .15em; margin-top: calc(var(--u) * .5); text-shadow: 0 0 calc(var(--u) * .4) var(--ink), 0 calc(var(--u) * .15) 0 var(--ink); }
 
+/* speedometer: left of the big position number */
+.h-speedo { right: calc(var(--u) * 17.6); bottom: calc(var(--u) * .8); width: calc(var(--u) * 14); height: calc(var(--u) * 14); }
+.sp-in { position: relative; width: 100%; height: 100%; transition: transform .2s var(--spring); transform-origin: 50% 60%; }
+.sp-in svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; overflow: visible; filter: drop-shadow(0 calc(var(--u) * .45) 0 rgba(18,22,74,.5)); }
+.sp-face { fill: rgba(18,22,74,.72); stroke: #fff; stroke-width: 2.6; }
+.sp-trk, .sp-dtrk, .sp-fill, .sp-dr { fill: none; stroke-linecap: round; }
+.sp-trk { stroke: rgba(255,255,255,.18); stroke-width: 7; }
+.sp-fill { stroke-width: 7; stroke-dasharray: 100; stroke-dashoffset: 100; }
+.sp-dtrk { stroke: rgba(255,255,255,.12); stroke-width: 2.6; }
+.sp-dr { stroke: #fff; stroke-width: 2.6; stroke-dasharray: 100; stroke-dashoffset: 100; opacity: 0; transition: opacity .12s; }
+.sp-in.draft .sp-dr { opacity: .95; }
+.tk { stroke: rgba(255,255,255,.55); stroke-width: 1.4; stroke-linecap: round; }
+.tk.big { stroke: #fff; stroke-width: 2.2; }
+.sp-nd { transform: translate(60px, 60px) rotate(-135deg); }
+.sp-nd path { fill: #ff3d5a; stroke: #fff; stroke-width: 1.6; stroke-linejoin: round; }
+.sp-hub { fill: #fff; stroke: #1a1f5c; stroke-width: 2; }
+.sp-glow { opacity: 0; fill-opacity: 1; }
+.sp-fl { opacity: 0; transform-box: fill-box; transform-origin: 50% 100%; fill: #ffb21f; stroke: #fff; stroke-width: 1.4; }
+.sp-num { position: absolute; left: 0; right: 0; top: 50%; text-align: center; display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+.sp-num b { font: 400 calc(var(--u) * 4.2)/1 var(--f-disp); font-style: italic; color: #fff; text-shadow: var(--ol), 0 .08em 0 var(--ink); font-variant-numeric: tabular-nums; }
+.sp-num span { font: 400 calc(var(--u) * 1.15)/1 var(--f-disp); letter-spacing: .12em; color: var(--cyan); margin-top: calc(var(--u) * .35); text-shadow: var(--ol); }
+.sp-in.boost { animation: spBoost .16s ease-in-out infinite alternate; }
+.sp-in.boost .sp-glow { opacity: 1; animation: spGlow .22s ease-in-out infinite alternate; }
+.sp-in.boost .sp-fill { filter: drop-shadow(0 0 3px #ff9a1e); }
+.sp-in.boost .sp-num b { color: #ffe066; }
+.sp-in.boost .sp-fl { opacity: 1; animation: spFlame .14s ease-in-out infinite alternate; }
+.sp-in.blue:not(.boost) .sp-face { stroke: #7fdcff; animation: spBlue .25s ease-in-out infinite alternate; }
+.sp-in.blue:not(.boost) .sp-hub { fill: #7fdcff; }
+@keyframes spBoost { to { transform: scale(1.06); } }
+@keyframes spGlow { to { opacity: .55; } }
+@keyframes spFlame { from { transform: scale(.85, .8); } to { transform: scale(1.1, 1.15); } }
+@keyframes spBlue { to { stroke-width: 4.6; } }
+.hudv:not([data-n="1"]) .h-speedo { right: calc(var(--u) * 13); bottom: calc(var(--u) * .6); width: calc(var(--u) * 10.4); height: calc(var(--u) * 10.4); }
+.hudv:not([data-n="1"]) .sp-num b { font-size: calc(var(--u) * 3.1); }
+.hudv:not([data-n="1"]) .sp-num span { font-size: calc(var(--u) * .9); }
+.hudv.is-battle .h-speedo { right: calc(var(--u) * 2); }
+
 .h-turbo { left: 50%; bottom: calc(var(--u) * 2); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * .6); }
 .tb { padding: calc(var(--u) * .3) calc(var(--u) * 2) calc(var(--u) * .4); border-radius: calc(var(--u) * 2); border: calc(var(--u) * .25) solid #fff; background: rgba(18,22,74,.6); font: 400 calc(var(--u) * 1.5)/1 var(--f-disp); letter-spacing: .08em; opacity: 0; transform: scale(.6); transition: opacity .1s, transform .2s var(--spring); color: var(--cyan); }
 .tb.on { opacity: 1; transform: scale(1); background: linear-gradient(180deg, #7fdcff, #1f7dff); color: #fff; box-shadow: 0 0 calc(var(--u) * 2.4) #2ee6ff, 0 calc(var(--u) * .35) 0 rgba(18,22,74,.5); text-shadow: var(--ol); animation: tbGlow .25s ease-in-out infinite alternate; }

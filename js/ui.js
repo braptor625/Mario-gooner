@@ -1212,7 +1212,7 @@
   // ------------------------------------------------------------------ HUD (per-viewport instances)
   const instances = [];
   let roulKeys = null;
-  const HUD_LAST_RESET = () => ({ lap: null, laps: null, fin: null, time: null, lapTimes: null, pos: null, racers: null, drift: null, draft: -1, wrong: null, slot: [null, null], cnt: [null, null], roul: [false, false], face: [null, null], coop: null, bal: null, shine: null, score: null, bt: null, btype: null, label: null });
+  const HUD_LAST_RESET = () => ({ lap: null, laps: null, fin: null, time: null, lapTimes: null, pos: null, racers: null, drift: null, draft: -1, wrong: null, slot: [null, null], cnt: [null, null], roul: [false, false], face: [null, null], coop: null, bal: null, shine: null, score: null, bt: null, btype: null, label: null, kmh: -1, ang: -1, boost: null, sblue: null });
 
   function iconHTML(id) {
     const it = G.ITEMS && G.ITEMS[id];
@@ -1229,6 +1229,26 @@
     return (nameIds[v] = c ? c.id : null);
   }
   const coopIdx = (v) => { if (typeof v === 'number') return v; const m = /(\d)/.exec(String(v)); return m ? (+m[1] - 1) : null; };
+
+  function speedoHTML(id) {
+    let t = '';
+    for (let i = 0; i <= 13; i++) {
+      const a = (135 + (270 * i) / 13) * Math.PI / 180, big = i % 3 === 0, r0 = big ? 40 : 43, r1 = 47.5;
+      t += '<line x1="' + (60 + r0 * Math.cos(a)).toFixed(1) + '" y1="' + (60 + r0 * Math.sin(a)).toFixed(1) + '" x2="' + (60 + r1 * Math.cos(a)).toFixed(1) + '" y2="' + (60 + r1 * Math.sin(a)).toFixed(1) + '" class="' + (big ? 'tk big' : 'tk') + '"/>';
+    }
+    const arc = 'M27.47 92.53A46 46 0 1 1 92.53 92.53', arc2 = 'M32.3 87.7A39 39 0 1 1 87.7 87.7';
+    return '<svg viewBox="0 0 120 120" aria-hidden="true">' +
+      '<defs><linearGradient id="sg' + id + '" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#7fdcff"/><stop offset=".55" stop-color="#fff3a0"/><stop offset="1" stop-color="#ff9a1e"/></linearGradient>' +
+      '<radialGradient id="sh' + id + '"><stop offset="0" stop-color="#ffd21f" stop-opacity=".9"/><stop offset=".6" stop-color="#ff7a1e" stop-opacity=".5"/><stop offset="1" stop-color="#ff7a1e" stop-opacity="0"/></radialGradient></defs>' +
+      '<circle class="sp-glow" cx="60" cy="60" r="58" fill="url(#sh' + id + ')"/>' +
+      '<circle class="sp-face" cx="60" cy="60" r="55"/>' +
+      '<path class="sp-trk" d="' + arc + '" pathLength="100"/>' +
+      '<path class="sp-fill" d="' + arc + '" pathLength="100" stroke="url(#sg' + id + ')"/>' +
+      '<path class="sp-dtrk" d="' + arc2 + '" pathLength="100"/>' +
+      '<path class="sp-dr" d="' + arc2 + '" pathLength="100"/>' + t +
+      '<g class="sp-nd"><path d="M-3.4 6 L0 -40 L3.4 6Z"/></g><circle class="sp-hub" cx="60" cy="60" r="5.5"/>' +
+      '<g class="sp-fl"><path d="M60 30c-9 8-12 15-6 24 1-5 4-6 6-6 2 0 5 1 6 6 6-9 3-16-6-24z"/></g></svg>';
+  }
 
   function createHUD(index, count) {
     index = index | 0; count = clamp(count | 0 || 1, 1, 4);
@@ -1248,6 +1268,7 @@
       '<div class="h-battle hidden"><div class="bt-time"></div><div class="bt-bal"></div><div class="bt-shine hidden"><span class="sl"></span><div class="sbar"><i></i></div></div><div class="bt-score hidden"><span class="sl">BOMB HITS</span><div class="pips"></div></div></div>' +
       '<div class="h-mini"><canvas width="120" height="190"></canvas></div>' +
       '<div class="h-pos"><div class="pos" data-p="1"><span class="n">1</span><span class="s">st</span></div><div class="pof">OF 8</div></div>' +
+      '<div class="h-speedo"><div class="sp-in">' + speedoHTML(index) + '<div class="sp-num"><b>0</b><span>KM/H</span></div></div></div>' +
       '<div class="h-turbo"><div class="tb"><i></i><span>MINI-TURBO</span></div><div class="dr"><span>SLIPSTREAM</span><div class="dbar"><i></i></div></div></div>' +
       '<div class="h-c"><div class="count"></div><div class="banner"><span></span></div><div class="wrong">' + ICONS.arrow + '<span>WRONG WAY</span></div></div>';
     const q = (s) => el.querySelector(s);
@@ -1258,6 +1279,7 @@
       ptag: q('.ptag-h'), coop: q('.coop'), cpD: q('.cp.d'), cpT: q('.cp.t'),
       battle: q('.h-battle'), btTime: q('.bt-time'), btBal: q('.bt-bal'), btShine: q('.bt-shine'), btShineL: q('.bt-shine .sl'), btShineBar: q('.bt-shine .sbar i'),
       btScore: q('.bt-score'), btPips: q('.bt-score .pips'),
+      speedo: q('.h-speedo'), spIn: q('.sp-in'), spFill: q('.sp-fill'), spDr: q('.sp-dr'), spNd: q('.sp-nd'), spNum: q('.sp-num b'),
       mini: q('.h-mini'), canvas: q('.h-mini canvas'), turbo: q('.h-turbo'), tb: q('.tb'), dr: q('.dr'), drBar: q('.dbar i'),
       count: q('.count'), banner: q('.banner'), bannerTx: q('.banner span'), wrong: q('.wrong'),
     };
@@ -1359,6 +1381,22 @@
         if (dl !== last.drift) { last.drift = dl; R.tb.classList.toggle('on', !!dl); }
         const dq = Math.round(clamp(s.drafting01 || 0, 0, 1) * 20);
         if (dq !== last.draft) { last.draft = dq; R.dr.classList.toggle('on', dq > 0); R.drBar.style.width = (dq * 5) + '%'; }
+        // speedometer (change-gated; transform/opacity + one dash offset)
+        {
+          const sp = s.speed01 || 0, kmh = Math.round(clamp(sp, 0, 1.3) * 160);
+          if (kmh !== last.kmh) { last.kmh = kmh; R.spNum.textContent = kmh; }
+          const f = clamp(sp / 1.3, 0, 1), aq = Math.round(f * 270 * 2);   // 0.5 degree steps
+          if (aq !== last.ang) {
+            last.ang = aq;
+            R.spNd.style.transform = 'translate(60px,60px) rotate(' + (aq / 2 - 135) + 'deg)';
+            R.spFill.style.strokeDashoffset = (100 * (1 - aq / 540)).toFixed(1);
+          }
+          const bo = !!s.boost;
+          if (bo !== last.boost) { last.boost = bo; R.spIn.classList.toggle('boost', bo); }
+          const sb = dl === 1;
+          if (sb !== last.sblue) { last.sblue = sb; R.spIn.classList.toggle('blue', sb); }
+          if (dq !== last.sdraft) { last.sdraft = dq; R.spDr.style.strokeDashoffset = (100 * (1 - dq / 20)).toFixed(1); R.spIn.classList.toggle('draft', dq > 0); }
+        }
         const ww = !!s.wrongWay;
         if (ww !== last.wrong) { last.wrong = ww; R.wrong.classList.toggle('on', ww); }
         // items + faces
