@@ -150,10 +150,10 @@
 
   // ------------------------------------------------------------ beauty helpers
   // Atlas-textured quads (signage, banners, painted road decals): everything lands in ONE mesh / draw call.
-  // atlas(cols, rows, draw(ctx, cell, x, y, w, h)) paints each cell of a canvas texture.
+  // makeAtlas(kit, cols, rows, cw, ch, draw(ctx, cw, ch, cell)) paints each cell of a canvas texture.
   function makeAtlas(kit, cols, rows, cw, ch, draw) {
     return kit.makeCanvasTexture(cols * cw, rows * ch, (ctx) => {
-      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { ctx.save(); ctx.translate(c * cw, r * ch); ctx.beginPath(); ctx.rect(0, 0, cw, ch); ctx.clip(); draw(ctx, r * cols + c, cw, ch); ctx.restore(); }
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { ctx.save(); ctx.translate(c * cw, r * ch); ctx.beginPath(); ctx.rect(0, 0, cw, ch); ctx.clip(); draw(ctx, cw, ch, r * cols + c); ctx.restore(); }
     });
   }
   class Signs {
@@ -441,7 +441,7 @@
       hw: 12, shoulder: 3, scale: 1, style: 'meadow', sky: 'sunset', railColors: [0xf6eedc, 0xe2b53a], noWalls: true, rails: true, ground: false, startArch: true, offroad: 'offroad',
       theme: {
         sky: [0x2c4fb0, 0xff9a62, 0xffc98a], fog: [0xf0b27a, 260, 900], ground: 0xd8bd84, shoulder: 0xb99b62,
-        road: [0x8a7c70, 0x7e7064], curb: [0xb7432e, 0xf0e2c0], hemi: [0xffe0bc, 0x9a6a52, 0.85], sun: [0xffc088, 0.88], emb: 0xc9a46a, bg: 0xf0b27a,
+        road: [0x8a7c70, 0x7e7064], curb: [0xb7432e, 0xf0e2c0], hemi: [0xffd8b8, 0x8a5a48, 0.78], sun: [0xffbe84, 0.72], emb: 0xc9a46a, bg: 0xf0b27a,
       },
       pts: CO.pts, pads,
       jumps: [{ d: GAP1, len: 3, l: 0, w: 22 }, { d: GAP2, len: 3, l: 0, w: 22 }],
@@ -1136,7 +1136,7 @@
     for (let d = 90, n = 0; d < L - 40; d += 112, n++) {
       if (inOpen(d) || inHall(d) || (d > LF.statue - 30 && d < LF.statue + 30)) continue;
       const f = kit.frame(d), hd = Math.atan2(f.tx, f.tz);
-      for (let s = -1; s <= 1; s += 2) { const l = s * (f.halfWidth + 4.4), p = kit.at(d, l, 0); gargoyle(b, eb, p[0], p[1] - 0.6, p[2], hd + (s > 0 ? -1 : 1) * 1.15, 1.25 + (n & 1) * 0.2, basalt2, basalt); gl.push([p[0], p[1] + 4.4, p[2], 0xff4a10, 0.7]); pools.push([p[0], p[1] + 0.12, p[2], 5, 0xff5a1a, 0.4]); }
+      for (let s = -1; s <= 1; s += 2) { const l = s * (f.halfWidth + 4.4), p = kit.at(d, l, 0); gargoyle(b, eb, p[0], p[1] - 0.6, p[2], hd + (s > 0 ? -1 : 1) * 1.15, 1.25 + (n & 1) * 0.2, mix(basalt2, col(0x9a7a6a), 0.45), col(0x5a4a50)); gl.push([p[0], p[1] + 4.4, p[2], 0xff4a10, 0.7]); pools.push([p[0], p[1] + 0.12, p[2], 5, 0xff5a1a, 0.4]); }
     }
     // chains hanging along the drawbridge and from the hall ceiling, with lanterns
     const link = (x, y, z, ry, rz) => b.box(x, y, z, 0.18, 0.18, 0.5, ry, ironL);
@@ -1188,7 +1188,7 @@
     for (const dd of [LF.smash[0][0] - 14, LF.bars[0][0] - 12, LF.bars[1][0] - 12]) dec.strip(dd, dd + 6, -6, 6, 0.07, 1, [1, 1, 1]);
     for (let d = 8; d < L - 12; d += 13) { if (inHall(d)) continue; const f = kit.frame(d), s = hash(d | 0, 5) < 0.5 ? -1 : 1, off = s * (f.halfWidth * 0.62 + hash(d | 0, 7) * 1.0); crk.strip(d, d + 12, off - 1.6, off + 1.6, 0.065, 0, [1, 0.8, 0.6]); }
     kit.mesh(b); kit.mesh(eb, {}, true);
-    ads.mesh({}); ban.mesh({}); dec.mesh({ decal: true }); crk.mesh({ basic: true, additive: true });
+    ads.mesh({}); ban.mesh({}); dec.mesh({ decal: true }); crk.mesh({ basic: true, additive: true, decal: true });
     // ---- ash drifting through the air, hot light pools & halos
     { const em = []; for (let d = 0; d < L; d += 47) { const f = kit.frame(d), p = kit.at(d, (((d / 47) | 0) & 1 ? 1 : -1) * (f.halfWidth + 8), 6); em.push([p[0], p[1], p[2]]); }
       kit.particles({ emitters: em, count: 14, vel: [0.7, -0.9, 0.3], spread: [0.4, 0.3, 0.4], jitter: [14, 8, 14], life: 7, size: 0.5, alpha: 0.7, pow: 0.5, wob: 1.6, color: [0x8a8078, 0x6a625c, 0xb0a498] }); }

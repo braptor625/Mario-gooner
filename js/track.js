@@ -1190,7 +1190,7 @@
         hg.translate(0, 28, 0);                       // spans y = -17 .. 73 around the camera, alpha peaks just above the horizon
         this._geoms.push(hg);
         const hc = mode === 'night' ? mix(fogc, mid, 0.5) : mix(fogc, [1, 1, 1], mode === 'sunset' ? 0.1 : 0.25);
-        const hm = new THREE.MeshBasicMaterial({ map: htex, color: new THREE.Color(hc[0], hc[1], hc[2]), transparent: true, opacity: mode === 'night' ? 0.4 : 0.55, depthWrite: false, depthTest: false, fog: false, side: THREE.BackSide });
+        const hm = new THREE.MeshBasicMaterial({ map: htex, color: new THREE.Color(hc[0], hc[1], hc[2]), transparent: true, opacity: mode === 'night' ? 0.22 : 0.26, depthWrite: false, depthTest: false, fog: false, side: THREE.BackSide });
         this._mats.push(hm);
         const hz2 = new THREE.Mesh(hg, hm); hz2.renderOrder = -995; this._follow(hz2); this._add(hz2);
       }
@@ -1554,8 +1554,7 @@
     _terrainWanted(def) {
       if (def.terrain === false) return false;
       if (this.theme === 'starlight' || this.skyMode === 'space' || this.skyMode === 'indoor') return false;
-      if (typeof document === 'undefined' || !document.createElement) { /* node stub: still build geometry */ }
-      if (def.terrain) return !!this.ground || def.ground === false ? true : true;
+      if (def.terrain) return true;
       if (def.ground === false || !this.ground) return false;
       if (this.noWalls && !this.rails) return false;
       return true;

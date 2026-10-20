@@ -2029,6 +2029,7 @@
       if (best < 8) continue;
       let l1 = edge + 10; while (l1 < 90 && th(kit.at(d, bl * l1, 0)[0], kit.at(d, bl * l1, 0)[2]) < f.y + 4) l1 += 3;
       let l2 = l1; while (l2 < 110 && th(kit.at(d, bl * l2, 0)[0], kit.at(d, bl * l2, 0)[2]) < f.y + 26) l2 += 3;
+      if (l2 - l1 > 34 || th(kit.at(d, bl * l2, 0)[0], kit.at(d, bl * l2, 0)[2]) < f.y + 14) continue;
       const n = Math.max(3, Math.round((l2 - l1) / 4)), P3 = [], UV = [], I = [];
       for (let i = 0; i <= n; i++) {
         const l = lerp(l1, l2, i / n), c = kit.at(d, bl * l, 0), t = kit.frame(d), y = th(c[0], c[2]) + 0.7;
