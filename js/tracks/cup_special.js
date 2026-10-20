@@ -148,6 +148,115 @@
   function sharedMesh(kit, geo, mat) { kit.trackGeom(geo); if (mat) kit.trackMat(mat); return new THREE.Mesh(geo, mat); }
   function batchGeo(kit, b) { const g = b.build(); kit.trackGeom(g); return g; }
 
+  // ------------------------------------------------------------ beauty helpers
+  // Atlas-textured quads (signage, banners, painted road decals): everything lands in ONE mesh / draw call.
+  // atlas(cols, rows, draw(ctx, cell, x, y, w, h)) paints each cell of a canvas texture.
+  function makeAtlas(kit, cols, rows, cw, ch, draw) {
+    return kit.makeCanvasTexture(cols * cw, rows * ch, (ctx) => {
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { ctx.save(); ctx.translate(c * cw, r * ch); ctx.beginPath(); ctx.rect(0, 0, cw, ch); ctx.clip(); draw(ctx, r * cols + c, cw, ch); ctx.restore(); }
+    });
+  }
+  class Signs {
+    constructor(kit, tex, cols, rows) { this.kit = kit; this.tex = tex; this.cols = cols; this.rows = rows; this.p = []; this.uv = []; this.k = []; this.i = []; this.n = 0; }
+    uvr(cell) { const c = cell % this.cols, r = (cell / this.cols) | 0; return [c / this.cols, 1 - (r + 1) / this.rows, (c + 1) / this.cols, 1 - r / this.rows]; }
+    // corners: bottom-left, bottom-right, top-right, top-left ([x,y,z]); k = tint [r,g,b]
+    quad(a, b, c, d, cell, k) {
+      const t = this.uvr(cell); k = k || [1, 1, 1];
+      this.p.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2], d[0], d[1], d[2]);
+      this.uv.push(t[0], t[1], t[2], t[1], t[2], t[3], t[0], t[3]);
+      for (let q = 0; q < 4; q++) this.k.push(k[0], k[1], k[2]);
+      const n = this.n; this.i.push(n, n + 1, n + 2, n, n + 2, n + 3); this.n += 4;
+    }
+    // upright board, bottom-centre (cx,y0,cz), facing direction ry (normal = (sin ry, 0, cos ry)), optional tilt back (rad)
+    board(cx, y0, cz, w, h, ry, cell, k, tilt) {
+      const s = Math.sin(ry), c = Math.cos(ry), rx = c, rz = -s, hw = w / 2, tl = Math.tan(tilt || 0) * h;
+      const P = (l, y, o) => [cx + rx * l - s * o, y0 + y, cz + rz * l - c * o];
+      this.quad(P(-hw, 0, 0), P(hw, 0, 0), P(hw, h, tl), P(-hw, h, tl), cell, k);
+    }
+    // road-conforming decal over d0..d1, lateral l0..l1 (cell v runs forward along the road)
+    strip(d0, d1, l0, l1, dy, cell, k, step) {
+      step = step || 5; const n = Math.max(1, Math.ceil((d1 - d0) / step)), kit = this.kit;
+      for (let j = 0; j < n; j++) {
+        const a = d0 + ((d1 - d0) * j) / n, e = d0 + ((d1 - d0) * (j + 1)) / n, t = this.uvr(cell);
+        const A = kit.at(a, l0, dy), B = kit.at(a, l1, dy), C = kit.at(e, l1, dy), D = kit.at(e, l0, dy);
+        const v0 = t[1] + (t[3] - t[1]) * (j / n), v1 = t[1] + (t[3] - t[1]) * ((j + 1) / n), kk = k || [1, 1, 1];
+        this.p.push(A[0], A[1], A[2], B[0], B[1], B[2], C[0], C[1], C[2], D[0], D[1], D[2]);
+        this.uv.push(t[0], v0, t[2], v0, t[2], v1, t[0], v1);
+        for (let q = 0; q < 4; q++) this.k.push(kk[0], kk[1], kk[2]);
+        const m = this.n; this.i.push(m, m + 1, m + 2, m, m + 2, m + 3); this.n += 4;
+      }
+    }
+    // o: {basic, decal, opacity, fog}
+    mesh(o) {
+      o = o || {};
+      if (!this.n) return null;
+      const kit = this.kit, g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+      g.setAttribute('color', new THREE.Float32BufferAttribute(this.k, 3));
+      g.setIndex(this.i); g.computeVertexNormals(); kit.trackGeom(g);
+      const mo = { map: this.tex, vertexColors: true, side: THREE.DoubleSide };
+      if (o.decal) { mo.transparent = true; mo.depthWrite = false; mo.polygonOffset = true; mo.polygonOffsetFactor = -4; mo.polygonOffsetUnits = -4; }
+      if (o.alpha) { mo.transparent = true; mo.alphaTest = 0.04; }
+      if (o.additive) { mo.transparent = true; mo.blending = THREE.AdditiveBlending; mo.depthWrite = false; }
+      if (o.fog === false) mo.fog = false;
+      const m = new THREE.Mesh(g, kit.trackMat(o.basic ? new THREE.MeshBasicMaterial(mo) : new THREE.MeshLambertMaterial(mo)));
+      m.frustumCulled = false; if (o.decal) m.renderOrder = 2;
+      kit.add(m); return m;
+    }
+  }
+  // soft round glow texture (white centre -> transparent), cached per kit
+  function glowTex(kit) {
+    return kit._glowT || (kit._glowT = kit.makeCanvasTexture(64, 64, (c) => {
+      const g = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+      g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.25, 'rgba(255,255,255,0.55)'); g.addColorStop(0.6, 'rgba(255,255,255,0.14)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+      c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+    }));
+  }
+  // camera-facing additive glow sprites (lamp halos, braziers, neon bulbs): pts [[x,y,z,hex,sizeMul?]], size in metres
+  function glowPoints(kit, pts, size, alpha) {
+    if (!pts.length) return null;
+    const pos = new Float32Array(pts.length * 3), cc = new Float32Array(pts.length * 3);
+    pts.forEach((q, i) => { const c = kit.col(q[3] === undefined ? 0xffc060 : q[3]), m = q[4] || 1; pos.set([q[0], q[1], q[2]], i * 3); cc.set([c[0] * m, c[1] * m, c[2] * m], i * 3); });
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(cc, 3)); kit.trackGeom(g);
+    const m = kit.trackMat(new THREE.PointsMaterial({ size, map: glowTex(kit), vertexColors: true, transparent: true, opacity: alpha === undefined ? 0.85 : alpha, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, fog: false }));
+    const p = new THREE.Points(g, m); p.frustumCulled = false; kit.add(p); return p;
+  }
+  // flat additive light pools on the ground / road: list [[x,y,z,r,hex,k]]
+  function glowPools(kit, list, segs) {
+    if (!list.length) return null;
+    segs = segs || 14; const P = [], C = [];
+    for (const [x, y, z, r, hexc, k] of list) {
+      const c = kit.col(hexc), m = k === undefined ? 1 : k;
+      for (let s = 0; s < segs; s++) {
+        const a0 = (s / segs) * TAU, a1 = ((s + 1) / segs) * TAU;
+        P.push(x, y, z, x + Math.cos(a0) * r, y, z + Math.sin(a0) * r, x + Math.cos(a1) * r, y, z + Math.sin(a1) * r);
+        C.push(c[0] * m, c[1] * m, c[2] * m, 0, 0, 0, 0, 0, 0);
+      }
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3)); kit.trackGeom(g);
+    const m = new THREE.Mesh(g, kit.trackMat(new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 })));
+    m.frustumCulled = false; m.renderOrder = 3; kit.add(m); return m;
+  }
+  // fluted column: plinth, tapering shaft, torus-ish rings, flared capital, abacus
+  function column(b, x, y, z, h, r, c, c2, sides) {
+    sides = sides || 10;
+    b.box(x, y, z, r * 2.9, r * 0.55, r * 2.9, 0, c2);
+    b.frustum(x, y + r * 0.55, z, r * 1.25, r * 1.1, r * 0.35, sides, c, 0);
+    b.frustum(x, y + r * 0.9, z, r * 1.0, r * 0.82, h - r * 2.3, sides, c, 0.2);
+    b.frustum(x, y + h - r * 1.4, z, r * 0.95, r * 1.25, r * 0.7, sides, c2, 0);
+    b.frustum(x, y + h - r * 0.7, z, r * 1.25, r * 1.5, r * 0.45, sides, c, 0);
+    b.box(x, y + h - r * 0.25, z, r * 3.3, r * 0.5, r * 3.3, 0, c2);
+  }
+  // flat arched opening on a facade plane (outward normal (sin ry, 0, cos ry)): rectangle + half-disc, bottom-centre at (cx,y0,cz)
+  function archOpening(b, cx, y0, cz, w, h, ry, c, off) {
+    const s = Math.sin(ry), co = Math.cos(ry), rx = co, rz = -s, hw = w / 2, hr = h - hw, o = off || 0.05;
+    const P = (l, y) => [cx + rx * l + s * o, y0 + y, cz + rz * l + co * o];
+    b.quad(P(-hw, 0), P(hw, 0), P(hw, hr), P(-hw, hr), c);
+    const n = 6;
+    for (let i = 0; i < n; i++) { const a0 = Math.PI * i / n, a1 = Math.PI * (i + 1) / n; b.tri(P(0, hr), P(Math.cos(a0) * hw, hr + Math.sin(a0) * hw), P(Math.cos(a1) * hw, hr + Math.sin(a1) * hw), c); }
+  }
+
   // =====================================================================================
   // 1. GRAND COLOSSEUM  (DD Wario Colosseum): stadium bowl, spiral ramps up and around, void edges, big jumps
   // =====================================================================================

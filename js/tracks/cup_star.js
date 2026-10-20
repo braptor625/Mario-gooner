@@ -239,6 +239,146 @@
   const colj = (kit, c, r, a) => kit.mul(c, 1 - a + r() * a * 2);
 
   // ====================================================================================================
+  // SHARED BEAUTY HELPERS (kit API only): glow sprites, painted signage atlases, props
+  // ====================================================================================================
+  const ADD = T.AdditiveBlending;
+  const _nr = { i: 0, dist: 0, ang: 0 };
+  // nearest centreline sample to (x,z): index, distance, and the heading that faces the road from there
+  function nearRoad(kit, x, z) {
+    let bi = 0, bd = 1e18;
+    for (let i = 0; i < kit.N; i += 2) { const dx = kit.px[i] - x, dz = kit.pz[i] - z, d = dx * dx + dz * dz; if (d < bd) { bd = d; bi = i; } }
+    _nr.i = bi; _nr.dist = Math.sqrt(bd); _nr.ang = Math.atan2(kit.px[bi] - x, kit.pz[bi] - z);
+    return _nr;
+  }
+  function softMap(kit) {
+    if (G.GFX && G.GFX.tex && G.GFX.tex.soft) return G.GFX.tex.soft;
+    return tex(kit, 64, 64, (c) => {
+      const g = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+      g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.35, 'rgba(255,255,255,0.45)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+      c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+    });
+  }
+  // camera-facing soft glow sprites (one Points draw). pts: [[x,y,z,hex?]]. o: {size, alpha, color, normal, fog}
+  function halos(kit, pts, o) {
+    if (!pts.length) return null;
+    o = o || {};
+    const pos = new Float32Array(pts.length * 3), cc = new Float32Array(pts.length * 3);
+    pts.forEach((p, i) => {
+      pos[i * 3] = p[0]; pos[i * 3 + 1] = p[1]; pos[i * 3 + 2] = p[2];
+      const c = kit.col(p[3] !== undefined ? p[3] : (o.color !== undefined ? o.color : 0xffffff));
+      cc[i * 3] = c[0]; cc[i * 3 + 1] = c[1]; cc[i * 3 + 2] = c[2];
+    });
+    const g = kit.trackGeom(new T.BufferGeometry());
+    g.setAttribute('position', new T.BufferAttribute(pos, 3)); g.setAttribute('color', new T.BufferAttribute(cc, 3));
+    const m = kit.trackMat(new T.PointsMaterial({
+      size: o.size || 4, sizeAttenuation: true, map: softMap(kit), vertexColors: true, transparent: true, opacity: o.alpha !== undefined ? o.alpha : 0.8,
+      depthWrite: false, blending: o.normal ? T.NormalBlending : ADD, fog: o.fog !== false,
+    }));
+    const pt = new T.Points(g, m); pt.frustumCulled = false; pt.renderOrder = 7; kit.add(pt);
+    return m;
+  }
+  // flat soft light pools on the ground (one mesh). spots: [[x,y,z,radius,hex]]
+  function pools(kit, spots, o) {
+    if (!spots.length) return null;
+    o = o || {};
+    const b = new kit.Batch(true), col = kit.col;
+    for (const s of spots) {
+      const k = col(s[4]), r = s[3], y = s[1] + 0.09;
+      b.quadUV([s[0] - r, y, s[2] - r], [s[0] + r, y, s[2] - r], [s[0] + r, y, s[2] + r], [s[0] - r, y, s[2] + r], k, [0, 0, 1, 0, 1, 1, 0, 1]);
+    }
+    const mo = { map: softMap(kit), transparent: true, depthWrite: false, opacity: o.alpha !== undefined ? o.alpha : 0.75, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 };
+    if (!o.normal) mo.blending = ADD;
+    const m = kit.mesh(b, mo, true); if (m) m.renderOrder = 3;
+    return m;
+  }
+  // painted rounded-rect brand plate (original brands) into a canvas cell
+  function rrect(c, x, y, w, h, r) {
+    c.beginPath(); c.moveTo(x + r, y); c.lineTo(x + w - r, y); c.quadraticCurveTo(x + w, y, x + w, y + r); c.lineTo(x + w, y + h - r);
+    c.quadraticCurveTo(x + w, y + h, x + w - r, y + h); c.lineTo(x + r, y + h); c.quadraticCurveTo(x, y + h, x, y + h - r); c.lineTo(x, y + r); c.quadraticCurveTo(x, y, x + r, y); c.closePath();
+  }
+  function logo(c, kind, cx, cy, s, fg, bg) {
+    c.save(); c.translate(cx, cy); c.fillStyle = fg; c.strokeStyle = fg; c.lineWidth = s * 0.14; c.lineJoin = 'round';
+    if (kind === 'circle') { c.beginPath(); c.arc(0, 0, s * 0.8, 0, TAU); c.fill(); c.fillStyle = bg; c.beginPath(); c.arc(0, 0, s * 0.42, 0, TAU); c.fill(); }
+    else if (kind === 'star') { c.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i & 1 ? s * 0.38 : s * 0.95; c.lineTo(Math.cos(a) * r, Math.sin(a) * r); } c.closePath(); c.fill(); }
+    else if (kind === 'bolt') { c.beginPath(); c.moveTo(s * 0.2, -s); c.lineTo(-s * 0.6, s * 0.1); c.lineTo(-s * 0.05, s * 0.1); c.lineTo(-s * 0.3, s); c.lineTo(s * 0.65, -s * 0.2); c.lineTo(s * 0.05, -s * 0.2); c.closePath(); c.fill(); }
+    else if (kind === 'flake') { for (let i = 0; i < 3; i++) { c.rotate(Math.PI / 3); c.beginPath(); c.moveTo(0, -s * 0.9); c.lineTo(0, s * 0.9); c.stroke(); } }
+    else if (kind === 'wave') { c.beginPath(); c.moveTo(-s, 0); c.bezierCurveTo(-s * 0.5, -s * 0.9, 0, s * 0.9, s * 0.5, -s * 0.1); c.bezierCurveTo(s * 0.7, -s * 0.5, s * 0.9, -s * 0.3, s, 0); c.stroke(); }
+    else if (kind === 'diamond') { c.beginPath(); c.moveTo(0, -s); c.lineTo(s * 0.8, 0); c.lineTo(0, s); c.lineTo(-s * 0.8, 0); c.closePath(); c.fill(); }
+    else if (kind === 'flame') { c.beginPath(); c.moveTo(0, -s); c.bezierCurveTo(s * 0.9, -s * 0.2, s * 0.8, s * 0.9, 0, s); c.bezierCurveTo(-s * 0.8, s * 0.9, -s * 0.9, -s * 0.1, 0, -s); c.fill(); }
+    else if (kind === 'leaf') { c.beginPath(); c.moveTo(-s, s * 0.6); c.quadraticCurveTo(-s * 0.6, -s, s, -s * 0.7); c.quadraticCurveTo(s * 0.7, s * 0.6, -s, s * 0.6); c.fill(); }
+    else if (kind === 'ring') { c.beginPath(); c.arc(0, 0, s * 0.7, 0, TAU); c.stroke(); c.beginPath(); c.arc(0, 0, s * 0.25, 0, TAU); c.fill(); }
+    c.restore();
+  }
+  // atlas of brand plates: items [{t, sub, fg, bg, ic}], 2 columns x rows, cell 512x128 (4:1) -> texture
+  function brandAtlas(kit, items, rows) {
+    const cw = 512, ch = 128, cols = 2;
+    return tex(kit, cols * cw, rows * ch, (c, w, h) => {
+      c.fillStyle = '#10121c'; c.fillRect(0, 0, w, h);
+      items.forEach((it, i) => {
+        const x = (i % cols) * cw, y = Math.floor(i / cols) * ch;
+        const g = c.createLinearGradient(0, y, 0, y + ch); g.addColorStop(0, it.bg); g.addColorStop(1, it.bg2 || it.bg);
+        c.fillStyle = g; rrect(c, x + 4, y + 4, cw - 8, ch - 8, 16); c.fill();
+        c.strokeStyle = it.fg; c.lineWidth = 6; rrect(c, x + 10, y + 10, cw - 20, ch - 20, 12); c.stroke();
+        logo(c, it.ic || 'circle', x + 62, y + ch / 2, 34, it.fg, it.bg);
+        c.textAlign = 'left'; c.textBaseline = 'middle'; c.fillStyle = it.tc || '#ffffff';
+        let fs = it.sub ? 50 : 60; c.font = '900 ' + fs + 'px "Trebuchet MS", Arial Black, Arial, sans-serif';
+        while (c.measureText(it.t).width > 360 && fs > 20) { fs -= 2; c.font = '900 ' + fs + 'px "Trebuchet MS", Arial Black, Arial, sans-serif'; }
+        c.shadowColor = 'rgba(0,0,0,0.45)'; c.shadowBlur = 6; c.fillText(it.t, x + 112, y + ch / 2 - (it.sub ? 13 : 0)); c.shadowBlur = 0;
+        if (it.sub) { c.font = '700 26px "Trebuchet MS", Arial, sans-serif'; c.fillStyle = it.fg; c.fillText(it.sub, x + 114, y + ch / 2 + 28); }
+      });
+    });
+  }
+  // advert boards / road-side signs sharing one brand atlas (2 draws: frames + painted plates)
+  function Ads(kit, items) {
+    const rows = Math.ceil(items.length / 2), map = brandAtlas(kit, items, rows), solid = new kit.Batch(), plates = new kit.Batch(true), col = kit.col;
+    const uv = (i) => { const u0 = (i % 2) * 0.5, v1 = 1 - Math.floor(i / 2) / rows; return [u0, v1 - 1 / rows, u0 + 0.5, v1]; };
+    const api = {
+      // a plate on a frame: centre-bottom (x,y0,z), faces heading ry (front = +z local), w x h metres
+      board(x, y0, z, ry, w, h, idx, frame, legs) {
+        const c = Math.cos(ry), s = Math.sin(ry), P = (l, y, f) => [x + l * c + (f || 0) * s, y, z - l * s + (f || 0) * c], k = col(frame !== undefined ? frame : 0x2a2f3a);
+        solid.box(x, y0 + (legs || 0), z, w + 0.5, h + 0.5, 0.25, ry, k);
+        if (legs) for (const sd of [-1, 1]) { const q = P(sd * (w / 2 - 0.2), 0); solid.box(q[0], y0, q[2], 0.22, legs, 0.22, ry, k); }
+        const t = uv(idx), yb = y0 + (legs || 0) + 0.25, yt = yb + h - 0.0;
+        plates.quadUV(P(-w / 2, yb, 0.14), P(w / 2, yb, 0.14), P(w / 2, yt, 0.14), P(-w / 2, yt, 0.14), [1, 1, 1], [t[0], t[1], t[2], t[1], t[2], t[3], t[0], t[3]]);
+      },
+      finish(opts) {
+        kit.mesh(solid, {}, false);
+        kit.mesh(plates, Object.assign(map ? { map } : { color: 0xffffff }, opts || {}), true);
+      },
+    };
+    return api;
+  }
+  // flat painted road decal from a brand atlas cell (reads forward along the road). returns nothing; pass a uvMode Batch
+  function roadPlate(kit, plates, d, l, w, len, idx, rows, dy) {
+    const u0 = (idx % 2) * 0.5, v1 = 1 - Math.floor(idx / 2) / rows, v0 = v1 - 1 / rows, y = dy || 0.07;
+    plates.quadUV(kit.at(d, l - w / 2, y), kit.at(d, l + w / 2, y), kit.at(d + len, l + w / 2, y), kit.at(d + len, l - w / 2, y), [1, 1, 1], [u0, v0, u0 + 0.5, v0, u0 + 0.5, v1, u0, v1]);
+  }
+  // white painted start-grid boxes behind the line (matches getStartGrid layout)
+  function gridBoxes(kit, b, hex) {
+    const k = kit.col(hex === undefined ? 0xffffff : hex), L = kit.length;
+    for (let n = 0; n < 8; n++) {
+      const row = n >> 1, side = n & 1 ? 1 : -1, d = L - 8 - row * 6 - (n & 1 ? 3 : 0), l = side * 4;
+      const q = (dd, ll) => kit.at(dd, ll, 0.075);
+      const bar = (a0, a1, l0, l1) => b.quad(q(a0, l0), q(a0, l1), q(a1, l1), q(a1, l0), k);
+      bar(d - 2.6, d - 2.45, l - 1.4, l + 1.4);      // rear edge
+      bar(d - 2.6, d + 0.4, l - 1.4, l - 1.25); bar(d - 2.6, d + 0.4, l + 1.25, l + 1.4);
+    }
+  }
+  // small helper: rotate a local (lx, lz) offset by heading ry (matches Batch.box convention)
+  const rotX = (lx, lz, ry) => lx * Math.cos(ry) + lz * Math.sin(ry);
+  const rotZ = (lx, lz, ry) => -lx * Math.sin(ry) + lz * Math.cos(ry);
+  // wooden lamp post with lantern head; lights are pushed into `lights` for halos/pools
+  function lampPost(b, x, y, z, ry, h, post, glow, lights, side) {
+    b.box(x, y, z, 0.3, h, 0.3, ry, post);
+    b.box(x, y, z, 0.7, 0.35, 0.7, ry, post);
+    const ax = x + rotX(0, side * 0.9, ry), az = z + rotZ(0, side * 0.9, ry);
+    b.box(x + (ax - x) * 0.5, y + h - 0.1, z + (az - z) * 0.5, 0.18, 0.18, 0.18 + Math.abs(side) * 0.9, ry, post);
+    b.box(ax, y + h - 0.55, az, 0.5, 0.55, 0.5, ry, glow);
+    b.box(ax, y + h - 0.0, az, 0.7, 0.14, 0.7, ry, post);
+    if (lights) lights.push([ax, y + h - 0.3, az]);
+  }
+
+  // ====================================================================================================
   // COURSE 1 — FROSTY FLOES  (frozen-lake circuit with an ice cave, sliding penguins and ice blocks)
   // ====================================================================================================
   (function frosty() {
