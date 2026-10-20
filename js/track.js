@@ -977,6 +977,7 @@
     _buildSky(def) {
       const cfg = this.cfg, mode = this.skyMode, rng = this.rng, style = def.style;
       const top = col(cfg.sky[0]), mid = col(cfg.sky[1]), bot = col(cfg.sky[2]), fogc = col(cfg.fog[0]);
+      const vr = mulberry((def.seed || 7) * 31 + 5);   // private stream: engine sky extras never disturb the course rng
       const sd = this._sunDir;
       const warm = mode === 'sunset' ? col(0xff9a4a) : col(0xffe2a8);
       const hz = (mode === 'day' || mode === 'sunset') ? mix(mid, fogc, 0.55) : mid;
@@ -1017,10 +1018,12 @@
       const P = [], C = [], I = [];
       const tint = (c, f) => mix(c, fogc, f);
       const ring = (R, y0, segs, hFn, stops) => {
-        const base = P.length / 3, S = stops.length;
+        const base = P.length / 3, S = stops.length, sp1 = vr() * 6.28, sp2 = vr() * 6.28;
         for (let k = 0; k <= segs; k++) {
           const a = (k / segs) * Math.PI * 2, h = hFn(a), cs = Math.cos(a) * R, sn = Math.sin(a) * R;
-          for (let s = 0; s < S; s++) { P.push(cs, y0 + (h - y0) * stops[s][0], sn); C.push(stops[s][1][0], stops[s][1][1], stops[s][1][2]); }
+          // gully / ridge light variation across the azimuth gives the silhouette real volume
+          const sh = 0.86 + 0.14 * Math.sin(a * 23 + sp1) + 0.08 * Math.sin(a * 41 + sp2);
+          for (let s = 0; s < S; s++) { const f = s === 0 ? 1 : sh; P.push(cs, y0 + (h - y0) * stops[s][0], sn); C.push(stops[s][1][0] * f, stops[s][1][1] * f, stops[s][1][2] * f); }
         }
         for (let k = 0; k < segs; k++) for (let s = 0; s < S - 1; s++) {
           const a = base + k * S + s, b = a + 1, c = a + S + 1, d = a + S;
@@ -1031,10 +1034,11 @@
       const rolling = (h0, amp) => { const p1 = ph(), p2 = ph(), p3 = ph(); return (a) => Math.max(2, h0 * (0.62 + amp * (0.5 * Math.sin(a * 3 + p1) + 0.35 * Math.sin(a * 7 + p2) + 0.2 * Math.sin(a * 13 + p3)))); };
       const ridged = (h0) => {
         const p1 = ph(), p2 = ph();
-        return (a) => h0 * (0.3 + 0.7 * (Math.pow(1 - Math.abs(Math.sin(a * 5 + p1)), 1.6) * 0.6 + Math.pow(1 - Math.abs(Math.sin(a * 11 + p2)), 2.2) * 0.4));
+        return (a) => h0 * (0.38 + 0.62 * (Math.pow(1 - Math.abs(Math.sin(a * 5 + p1)), 1.1) * 0.62 + Math.pow(1 - Math.abs(Math.sin(a * 11 + p2)), 1.5) * 0.38));
       };
       const mesa = (h0) => { const p1 = ph(), p2 = ph(); return (a) => h0 * (0.12 + 0.88 * smooth01(Math.sin(a * 4 + p1) * 2.2 + Math.sin(a * 9 + p2) * 0.6)); };
-      const grad = (c, f0, f1) => [[0, tint(c, f0)], [0.3, tint(c, f1)], [1, c]];
+      // base stays hazy (below / at the horizon), body is clearly visible, so ranges read as solid volumes resting on the ground
+      const grad = (c, f0, f1) => [[0, tint(c, Math.max(f0, 0.8))], [0.14, tint(c, Math.min(f0, 0.5) * 0.9)], [0.5, tint(c, f1 * 0.7)], [1, c]];
       if (mode === 'day' || mode === 'sunset') {
         const sunset = mode === 'sunset', emb = col(cfg.emb);
         const hill = lum(emb) > 0.03 ? mix(emb, col(cfg.ground), 0.3) : col(cfg.ground);
@@ -1189,8 +1193,8 @@
         const hg = new THREE.CylinderGeometry(286, 286, 90, 48, 1, true);
         hg.translate(0, 28, 0);                       // spans y = -17 .. 73 around the camera, alpha peaks just above the horizon
         this._geoms.push(hg);
-        const hc = mode === 'night' ? mix(fogc, mid, 0.5) : mix(fogc, [1, 1, 1], mode === 'sunset' ? 0.1 : 0.25);
-        const hm = new THREE.MeshBasicMaterial({ map: htex, color: new THREE.Color(hc[0], hc[1], hc[2]), transparent: true, opacity: mode === 'night' ? 0.22 : 0.26, depthWrite: false, depthTest: false, fog: false, side: THREE.BackSide });
+        const hc = mode === 'night' ? mix(fogc, mid, 0.5) : mix(fogc, hz, 0.4);
+        const hm = new THREE.MeshBasicMaterial({ map: htex, color: new THREE.Color(hc[0], hc[1], hc[2]), transparent: true, opacity: mode === 'night' ? 0.16 : 0.18, depthWrite: false, depthTest: false, fog: false, side: THREE.BackSide });
         this._mats.push(hm);
         const hz2 = new THREE.Mesh(hg, hm); hz2.renderOrder = -995; this._follow(hz2); this._add(hz2);
       }
@@ -1199,9 +1203,9 @@
         const SP = [], SU = [], SC = [], SI = [], R2 = 268, n = mode === 'night' ? 7 : 11;
         const tone = mode === 'sunset' ? [1, 0.72, 0.62] : mode === 'night' ? [0.22, 0.26, 0.42] : [0.93, 0.96, 1];
         for (let k = 0; k < n; k++) {
-          const az = (k / n) * Math.PI * 2 + rng() * 0.4, el = (2 + rng() * 5) * Math.PI / 180, w2 = 70 + rng() * 60, h2 = w2 * 0.22;
+          const az = (k / n) * Math.PI * 2 + vr() * 0.4, el = (2 + vr() * 5) * Math.PI / 180, w2 = 70 + vr() * 60, h2 = w2 * 0.22;
           const ce = Math.cos(el), cx = Math.cos(az) * ce * R2, cy = Math.sin(el) * R2, cz = Math.sin(az) * ce * R2, rx = -Math.sin(az), rz = Math.cos(az);
-          const cell = (rng() * 4) | 0, u0 = (cell & 1) * 0.5, v0 = 0.5 * (1 - (cell >> 1)), vi = SP.length / 3;
+          const cell = (vr() * 4) | 0, u0 = (cell & 1) * 0.5, v0 = 0.5 * (1 - (cell >> 1)), vi = SP.length / 3;
           SP.push(cx - rx * w2, cy - h2, cz - rz * w2, cx + rx * w2, cy - h2, cz + rz * w2, cx + rx * w2, cy + h2, cz + rz * w2, cx - rx * w2, cy + h2, cz - rz * w2);
           SU.push(u0, v0, u0 + 0.5, v0, u0 + 0.5, v0 + 0.5, u0, v0 + 0.5);
           for (let q = 0; q < 4; q++) SC.push(tone[0], tone[1], tone[2]);
@@ -1219,7 +1223,7 @@
         const AP = [], AC = [], AI = [], R3 = 262, segs = 36;
         const pal = [[0.15, 1, 0.55], [0.3, 0.9, 0.9], [0.65, 0.4, 1]];
         for (let k = 0; k < 3; k++) {
-          const a0 = rng() * 6.28, span = 1.2 + rng() * 0.9, el0 = (14 + k * 6 + rng() * 6) * Math.PI / 180, p1 = rng() * 6.28, base = AP.length / 3;
+          const a0 = vr() * 6.28, span = 1.2 + vr() * 0.9, el0 = (14 + k * 6 + vr() * 6) * Math.PI / 180, p1 = vr() * 6.28, base = AP.length / 3;
           for (let i = 0; i <= segs; i++) {
             const t = i / segs, az = a0 + t * span, wob = Math.sin(t * 9 + p1) * 0.07 + Math.sin(t * 4 + p1 * 2) * 0.05, e0 = el0 + wob, e1 = e0 + (0.32 + 0.12 * Math.sin(t * 6 + p1)) * (0.7 + 0.3 * Math.sin(t * Math.PI));
             const fade = Math.sin(t * Math.PI), pc = pal[k % 3], lo = 0.7 * fade, hi = 0.0;
@@ -1240,8 +1244,8 @@
         if (nt) {
           const NP = [], NU = [], NC = [], NI = [], R4 = 275, cols = [[0.9, 0.25, 0.7], [0.25, 0.55, 1], [0.6, 0.35, 1], [0.2, 0.9, 0.8]];
           for (let k = 0; k < 14; k++) {
-            const az = rng() * 6.28, el = (rng() * 1.2 - 0.25) * 0.9, sz = 60 + rng() * 80, ce = Math.cos(el), cx = Math.cos(az) * ce * R4, cy = Math.sin(el) * R4, cz = Math.sin(az) * ce * R4;
-            const rx = -Math.sin(az), rz = Math.cos(az), rot = rng() * 6.28, c = cols[k % 4], br = 0.35 + rng() * 0.3, vi = NP.length / 3;
+            const az = vr() * 6.28, el = (vr() * 1.2 - 0.25) * 0.9, sz = 60 + vr() * 80, ce = Math.cos(el), cx = Math.cos(az) * ce * R4, cy = Math.sin(el) * R4, cz = Math.sin(az) * ce * R4;
+            const rx = -Math.sin(az), rz = Math.cos(az), rot = vr() * 6.28, c = cols[k % 4], br = 0.35 + vr() * 0.3, vi = NP.length / 3;
             const ca = Math.cos(rot), sa = Math.sin(rot);
             for (const [u, v] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const lu = (u * ca - v * sa) * sz, lv = (u * sa + v * ca) * sz; NP.push(cx + rx * lu, cy + lv, cz + rz * lu); NC.push(c[0] * br, c[1] * br, c[2] * br); }
             NU.push(0, 0, 1, 0, 1, 1, 0, 1); NI.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
@@ -1325,9 +1329,9 @@
             // painted wear: soft blotches, rubber-darkened racing line, occasional repair patches; shadow under the curb lip
             let wv = 1;
             if (kind === 'asph' || kind === 'tire') {
-              wv = 0.945 + 0.11 * vnoise(d * 0.045, c * 1.3 + 5, 3) - 0.03 * vnoise(d * 0.3, c * 2.1, 9);
-              if (hash2(r >> 3, 7.7) < 0.1 && c > 3 && c < 11) wv *= 0.9 + 0.04 * ((c & 1) ? 1 : -1);
-              if (kind === 'tire') wv *= 0.97;
+              wv = (inIce ? 0.97 : 0.8) + 0.24 * vnoise(d * 0.045, c * 1.3 + 5, 3) - 0.08 * vnoise(d * 0.3, c * 2.1, 9);
+              if (hash2(r >> 3, 7.7) < 0.12 && c > 3 && c < 11) wv *= 0.84 + 0.05 * ((c & 1) ? 1 : -1);
+              if (kind === 'tire') wv *= 0.9;
             } else if (kind === 'gap') wv = 0.82;
             if (wv !== 1) k = [k[0] * wv, k[1] * wv, k[2] * wv];
           }
