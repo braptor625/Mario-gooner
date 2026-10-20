@@ -333,6 +333,7 @@
     const rows = Math.ceil(items.length / 2), map = brandAtlas(kit, items, rows), solid = new kit.Batch(), plates = new kit.Batch(true), col = kit.col;
     const uv = (i) => { const u0 = (i % 2) * 0.5, v1 = 1 - Math.floor(i / 2) / rows; return [u0, v1 - 1 / rows, u0 + 0.5, v1]; };
     const api = {
+      map, rows,
       // a plate on a frame: centre-bottom (x,y0,z), faces heading ry (front = +z local), w x h metres
       board(x, y0, z, ry, w, h, idx, frame, legs) {
         const c = Math.cos(ry), s = Math.sin(ry), P = (l, y, f) => [x + l * c + (f || 0) * s, y, z - l * s + (f || 0) * c], k = col(frame !== undefined ? frame : 0x2a2f3a);
@@ -340,6 +341,11 @@
         if (legs) for (const sd of [-1, 1]) { const q = P(sd * (w / 2 - 0.2), 0); solid.box(q[0], y0, q[2], 0.22, legs, 0.22, ry, k); }
         const t = uv(idx), yb = y0 + (legs || 0) + 0.25, yt = yb + h - 0.0;
         plates.quadUV(P(-w / 2, yb, 0.14), P(w / 2, yb, 0.14), P(w / 2, yt, 0.14), P(-w / 2, yt, 0.14), [1, 1, 1], [t[0], t[1], t[2], t[1], t[2], t[3], t[0], t[3]]);
+      },
+      // painted plate lying on the road (reads forward), at distance d, lateral l
+      road(d, l, w, len, idx) {
+        const t = uv(idx), y = 0.075;
+        plates.quadUV(kit.at(d, l - w / 2, y), kit.at(d, l + w / 2, y), kit.at(d + len, l + w / 2, y), kit.at(d + len, l - w / 2, y), [0.95, 0.95, 0.95], [t[0], t[1], t[2], t[1], t[2], t[3], t[0], t[3]]);
       },
       finish(opts) {
         kit.mesh(solid, {}, false);
@@ -399,7 +405,7 @@
       hw: HW, shoulder: 5, scale: 1, style: 'glacier', snow: true, offroad: 'offroad',
       walls: 'barrier', wallColors: [0xffffff, 0xbfe0f5],
       theme: {
-        sky: [0x4f8fe0, 0xc4e2fb, 0xeaf5ff], fog: [0xd2e8f8, 80, 430], ground: 0xc9dff0, shoulder: 0xeef6fd,
+        sky: [0x2a5fc8, 0x8cc2f4, 0xf2e6f6], fog: [0xd6e6f8, 100, 520], ground: 0xc9dff0, shoulder: 0xeef6fd,
         road: [0x5d6880, 0x555f77], curb: [0x2c7ed6, 0xffffff], hemi: [0xdbeaff, 0x9db4d0, 0.8], sun: [0xfff4e4, 0.6],
         emb: 0xd8e8f6, bg: 0xd2e8f8,
       },
@@ -510,7 +516,189 @@
       // dripping meltwater under the cave roof
       { const em = []; for (let d = d0 + 8; d < d1 - 6; d += 7) { const l = (rng() - 0.5) * 18, f = kit.frame(d); em.push([f.x + f.rx * l, f.y + 11.5 - Math.abs(l) * 0.32, f.z + f.rz * l]); }
         kit.particles({ emitters: em, count: 2, vel: [0, 0, 0], spread: [0.05, 0, 0.05], life: 1.3, grav: -16, size: 0.32, alpha: 0.9, pow: 0.4, fadeIn: 0.02, color: [0xcdf0ff, 0xffffff] }); }
+      frostyExtra(kit, dLake, dCave, dLake2);
     };
+  }
+
+  // ---- Frosty Floes beauty pass: aurora, chalets, snowmen, ice sculptures, lake cracks, adverts, lamps
+  function frostyExtra(kit, dLake, dCave, dLake2) {
+    const rng = kit.rng, col = kit.col, gy = kit.groundY, L = kit.length, white = [1, 1, 1];
+    // ---------------- aurora curtains (camera-locked, additive)
+    {
+      const at = tex(kit, 512, 128, (c, w, h) => {
+        c.clearRect(0, 0, w, h);
+        for (let x = 0; x < w; x += 2) {
+          const a = 0.25 + 0.75 * Math.pow(0.5 + 0.5 * Math.sin(x * 0.05 + Math.sin(x * 0.013) * 3), 2), hh = h * (0.55 + 0.45 * Math.sin(x * 0.021 + 1));
+          const g = c.createLinearGradient(0, h, 0, h - hh);
+          g.addColorStop(0, 'rgba(60,255,170,0)'); g.addColorStop(0.2, 'rgba(90,255,190,' + (0.7 * a) + ')'); g.addColorStop(0.65, 'rgba(70,200,255,' + (0.45 * a) + ')'); g.addColorStop(1, 'rgba(190,110,255,0)');
+          c.fillStyle = g; c.fillRect(x, h - hh, 2, hh);
+        }
+      });
+      if (at) {
+        at.wrapS = T.RepeatWrapping;
+        for (let k = 0; k < 2; k++) {
+          const segs = 48, a0 = k ? 3.6 : 0.4, span = k ? 1.9 : 2.5, R = k ? 285 : 275, P = [], U = [], I = [];
+          for (let i = 0; i <= segs; i++) {
+            const u = i / segs, a = a0 + u * span, sw = Math.sin(u * 9 + k * 2) * 14, y0 = (k ? 70 : 82) + sw, y1 = y0 + 62 + Math.sin(u * 5 + k) * 18;
+            P.push(Math.cos(a) * R, y0, Math.sin(a) * R, Math.cos(a) * R, y1, Math.sin(a) * R); U.push(u * 2, 0, u * 2, 1);
+            if (i < segs) { const q = i * 2; I.push(q, q + 1, q + 3, q, q + 3, q + 2); }
+          }
+          const g = kit.trackGeom(new T.BufferGeometry());
+          g.setAttribute('position', new T.Float32BufferAttribute(P, 3)); g.setAttribute('uv', new T.Float32BufferAttribute(U, 2)); g.setIndex(I);
+          const m = new T.Mesh(g, kit.trackMat(new T.MeshBasicMaterial({ map: at, transparent: true, blending: ADD, depthWrite: false, fog: false, side: T.DoubleSide, opacity: 0.95, color: k ? 0xd8a8ff : 0xffffff })));
+          m.renderOrder = -996; kit.follow(m); kit.add(m);
+        }
+        kit.scroll(at, 0.012, 0);
+      }
+    }
+    const b = new kit.Batch(), pf = new kit.Batch(), wb = new kit.Batch(true), lights = [], smoke = [];
+    const wood = [col(0x8a5a34), col(0x7a4c2a)], roofSnow = col(0xf6fbff), eave = col(0x5a3a22), stone = col(0x8a8f9a);
+    const edgeOK = (x, z, m) => kit.clear(x, z, m);
+    // ---------------- chalets with lit windows
+    const chalet = (x, y, z, ry, s) => {
+      const R = (lx, lz) => [x + rotX(lx * s, lz * s, ry), z + rotZ(lx * s, lz * s, ry)];
+      for (let k = 0; k < 4; k++) b.box(x, y + k * 0.85 * s, z, 7 * s, 0.85 * s, 5.5 * s, ry, wood[k & 1]);
+      const ys = y + 3.4 * s, ry0 = y + 5.7 * s;
+      for (const sd of [-1, 1]) {
+        const e0 = R(-4 * s / s * 1, sd * 3.1), e1 = R(4, sd * 3.1), r0 = R(-4, 0), r1 = R(4, 0);
+        b.quad([e0[0], ys, e0[1]], [e1[0], ys, e1[1]], [r1[0], ry0, r1[1]], [r0[0], ry0, r0[1]], roofSnow);
+        const o0 = R(-4, sd * 3.5), o1 = R(4, sd * 3.5);
+        b.quad([o0[0], ys - 0.25 * s, o0[1]], [o1[0], ys - 0.25 * s, o1[1]], [e1[0], ys, e1[1]], [e0[0], ys, e0[1]], eave);
+      }
+      for (const sd of [-1, 1]) { const a = R(sd * 3.5, -2.75), c = R(sd * 3.5, 2.75), t = R(sd * 3.5, 0); b.tri([a[0], ys, a[1]], [c[0], ys, c[1]], [t[0], ry0 - 0.1, t[1]], wood[0]); }
+      const ch = R(2.2, -1.2); b.box(ch[0], y + 3 * s, ch[1], 1 * s, 3.4 * s, 1 * s, ry, stone); b.box(ch[0], y + 6.3 * s, ch[1], 1.3 * s, 0.35 * s, 1.3 * s, ry, roofSnow);
+      if (smoke.length < 8) smoke.push([ch[0], y + 6.7 * s, ch[1]]);
+      const dr = R(-1.5, 2.8); b.box(dr[0], y, dr[1], 1.3 * s, 2.2 * s, 0.14, ry, col(0xa83a2a));
+      const win = (lx, lz, nrm) => {
+        const p = R(lx, lz), wy = y + 1.5 * s, hr = ry + nrm;
+        b.box(p[0], wy - 0.1, p[1], 1.8 * s, 1.5 * s, 0.1, hr, col(0xf4efe6));
+        const q = [p[0] + Math.sin(hr) * 0.08, p[1] + Math.cos(hr) * 0.08];
+        wb.box(q[0], wy + 0.1, q[1], 1.35 * s, 1.1 * s, 0.1, hr, [1, 0.78, 0.35]);
+        lights.push([q[0] + Math.sin(hr) * 0.4, wy + 0.6 * s, q[1] + Math.cos(hr) * 0.4, 0xffb858]);
+      };
+      win(1.6, 2.78, 0); win(-4, 0.8 * 0, 0);
+      const side = R(3.52, 0); b.box(side[0], y + 1.4 * s, side[1], 0.2, 1.4 * s, 1.5 * s, ry + Math.PI / 2, col(0xf4efe6));
+      wb.box(side[0] + Math.sin(ry + Math.PI / 2) * 0.15, y + 1.55 * s, side[1] + Math.cos(ry + Math.PI / 2) * 0.15, 0.1, 1.05 * s, 1.2 * s, ry + Math.PI / 2, [1, 0.78, 0.35]);
+      b.blob(x, y + 0.1, z, 4.6 * s, 0.9 * s, 3.6 * s, white, 0);
+    };
+    let placed = 0;
+    kit.scatter(120, 14, 60, 22, (x, z, i, r) => {
+      if (placed >= 12) return;
+      const nr = nearRoad(kit, x, z);
+      if (nr.dist < 26) return;
+      placed++;
+      chalet(x, gy, z, nr.ang + (r() - 0.5) * 0.7, 1 + r() * 0.5);
+      // picket fence + snow-covered shrubs around
+      for (let k = 0; k < 6; k++) { const a = r() * TAU, px = x + Math.cos(a) * 7, pz = z + Math.sin(a) * 7; b.blob(px, gy + 0.4, pz, 1.2, 0.8, 1.2, col(0x2f7a60), 0); b.blob(px, gy + 0.9, pz, 1.1, 0.5, 1.1, white, 0); }
+      lampPost(b, x + Math.cos(nr.ang) * 6, gy, z + Math.sin(nr.ang) * 6, nr.ang, 3.2, col(0x3a2a1e), col(0xffd080), lights, 1);
+    });
+    // ---------------- snowman families
+    const snowman = (x, z, ry, s, scarf) => {
+      b.blob(x, gy + 0.9 * s, z, 1.25 * s, 1.0 * s, 1.25 * s, white, 1); b.blob(x, gy + 2.1 * s, z, 0.95 * s, 0.8 * s, 0.95 * s, white, 1); b.blob(x, gy + 3.0 * s, z, 0.7 * s, 0.62 * s, 0.7 * s, white, 1);
+      const f = (lx, lz) => [x + rotX(lx * s, lz * s, ry), z + rotZ(lx * s, lz * s, ry)];
+      const n = f(0, 0.75); b.box(n[0], gy + 2.95 * s, n[1], 0.14 * s, 0.14 * s, 0.7 * s, ry, col(0xff7a1a));
+      for (const sd of [-1, 1]) { const e = f(sd * 0.25, 0.6); b.box(e[0], gy + 3.2 * s, e[1], 0.1 * s, 0.1 * s, 0.1 * s, ry, [0.05, 0.05, 0.08]); const a = f(sd * 1.3, 0); b.box(a[0], gy + 2.3 * s, a[1], 1.2 * s, 0.09 * s, 0.09 * s, ry + sd * 0.5, col(0x5a3a22)); }
+      for (let k = 0; k < 3; k++) { const bt = f(0, 0.93 - k * 0.05); b.box(bt[0], gy + (2.3 - k * 0.45) * s, bt[1], 0.14 * s, 0.14 * s, 0.1, ry, [0.05, 0.05, 0.08]); }
+      b.box(x, gy + 2.55 * s, z, 1.2 * s, 0.28 * s, 1.2 * s, ry, scarf);
+      b.box(x, gy + 3.5 * s, z, 0.95 * s, 0.14 * s, 0.95 * s, ry, col(0x2a2a40)); b.box(x, gy + 3.55 * s, z, 0.6 * s, 0.7 * s, 0.6 * s, ry, col(0x2a2a40));
+    };
+    { const sc = [col(0xe8383d), col(0x2c7ed6), col(0xffc21a), col(0x35c0d9)]; let n = 0;
+      kit.scatter(40, 4, 34, 22, (x, z, i, r) => { if (n >= 14) return; n++; const nr = nearRoad(kit, x, z); const s = 0.8 + r() * 0.5; snowman(x, z, nr.ang + (r() - 0.5), s, sc[n & 3]); if (r() < 0.6) snowman(x + 2.4, z + 0.6, nr.ang + 0.3, s * 0.6, sc[(n + 1) & 3]); }); }
+    // ---------------- ice sculptures: crystal clusters, ice penguins on pedestals, spires
+    const ib = new kit.Batch();
+    const crystal = (x, z, s, r) => {
+      for (let k = 0; k < 5; k++) {
+        const a = r() * TAU, d = k ? (1 + r() * 2.2) * s : 0, h = (k ? 4 + r() * 6 : 14 + r() * 8) * s, w = (k ? 0.9 : 1.8) * s;
+        const c = kit.mix(col(0x9fe0ff), col(0xe6f8ff), r());
+        ib.frustum(x + Math.cos(a) * d, gy - 0.3, z + Math.sin(a) * d, w, w * 0.15, h, 6, c, r() * 3);
+        ib.frustum(x + Math.cos(a) * d, gy - 0.3 + h, z + Math.sin(a) * d, w * 0.15, 0, w * 1.6, 6, [1, 1, 1], 0);
+      }
+    };
+    const iceBird = (x, z, ry, s) => {
+      const c = col(0xcfeeff), c2 = col(0xeaf8ff), f = (lx, lz) => [x + rotX(lx * s, lz * s, ry), z + rotZ(lx * s, lz * s, ry)];
+      ib.box(x, gy, z, 3 * s, 1 * s, 3 * s, ry, c2); ib.box(x, gy + 0.9 * s, z, 2.2 * s, 0.4 * s, 2.2 * s, ry, c);
+      ib.blob(x, gy + 3.2 * s, z, 1.1 * s, 1.8 * s, 0.9 * s, c, 1); ib.blob(x, gy + 5.2 * s, z, 0.62 * s, 0.6 * s, 0.6 * s, c2, 1);
+      const bk = f(0, 0.7); ib.box(bk[0], gy + 5.1 * s, bk[1], 0.18 * s, 0.18 * s, 0.6 * s, ry, col(0xffd9a0));
+      for (const sd of [-1, 1]) { const w = f(sd * 1.0, 0); ib.box(w[0], gy + 3.3 * s, w[1], 0.2 * s, 1.5 * s, 0.9 * s, ry + sd * 0.3, c); }
+    };
+    let ic = 0;
+    kit.scatter(30, 2, 110, 26, (x, z, i, r) => {
+      if (ic >= 18) return; if (!edgeOK(x, z, 26)) return; ic++;
+      const nr = nearRoad(kit, x, z);
+      if (ic % 3 === 0) iceBird(x, z, nr.ang, 1 + r() * 0.5); else crystal(x, z, 0.7 + r() * 0.9, r);
+    });
+    // twin crystal gates framing the start straight
+    for (const sd of [-1, 1]) { const p = kit.at(L - 40, sd * 33, 0); crystal(p[0], p[2], 1.3, rng); const q = kit.at(L - 14, sd * 27, 0); iceBird(q[0], q[2], Math.atan2(-sd, 0), 1.2); }
+    // ---------------- extra pines (dense forest bands), snow berms, boulders
+    kit.scatter(380, 3, 130, 22, (x, z, i, r) => {
+      const s = 0.8 + r() * 1.5, g = kit.mix(col(0x1f6b57), col(0x2a7d6e), r()), n = 3;
+      pf.box(x, gy, z, 0.5 * s, 1.4 * s, 0.5 * s, 0, col(0x5a3d2a));
+      for (let k = 0; k < n; k++) { const r0 = (3.0 - k * 0.8) * s, hh = 3.0 * s, yy = gy + (1.2 + k * 1.8) * s; pf.frustum(x, yy, z, r0, 0, hh, 6, g, r()); pf.frustum(x, yy + hh * 0.38, z, r0 * 0.62, 0, hh * 0.62, 6, white, 0); }
+    });
+    for (let d = 4; d < L - 4; d += 5 + rng() * 5) for (const sd of [-1, 1]) {
+      const p = kit.at(d, sd * (21 + rng() * 5), 0), s = 1 + rng() * 1.6;
+      if (rng() < 0.7) b.blob(p[0], p[1] - 0.4, p[2], 2.6 * s, 0.9 * s, 1.8 * s, kit.mix(white, col(0xd6ecfa), rng()), 1);
+      else b.blob(p[0], p[1] + 0.2, p[2], 0.9 * s, 0.7 * s, 0.9 * s, kit.mul(col(0x7b8696), 0.8 + rng() * 0.3), 0);
+    }
+    // ---------------- lake: cracks, floes, frost sheen
+    const cb = new kit.Batch(true), cr = col(0xf2fbff), sheen = [];
+    for (const lk of [{ d: dLake, r: 118, n: 34 }, { d: dLake2, r: 58, n: 12 }]) {
+      const f = kit.frame(lk.d), cx = f.x + f.rx * 8, cz = f.z + f.rz * 8;
+      for (let n = 0; n < lk.n; n++) {
+        let a = rng() * TAU, rr = 4 + rng() * lk.r * 0.85, x = cx + Math.cos(a) * rr, z = cz + Math.sin(a) * rr, h = rng() * TAU;
+        for (let sgm = 0; sgm < 4 + (rng() * 5 | 0); sgm++) {
+          const len = 4 + rng() * 9, nx = x + Math.cos(h) * len, nz = z + Math.sin(h) * len;
+          if (Math.hypot(nx - cx, nz - cz) < lk.r - 4 && kit.clear(x, z, 17) && kit.clear(nx, nz, 17)) {
+            const w = 0.13 + rng() * 0.12, px = -Math.sin(h) * w, pz = Math.cos(h) * w, y = gy + 0.12;
+            cb.quad([x - px, y, z - pz], [x + px, y, z + pz], [nx + px, y, nz + pz], [nx - px, y, nz - pz], [0.82, 0.95, 1]);
+          }
+          x = nx; z = nz; h += (rng() - 0.5) * 1.1;
+        }
+      }
+      // broken ice floes near the rim
+      for (let n = 0; n < 16; n++) {
+        const a = rng() * TAU, rr = lk.r * (0.8 + rng() * 0.17), x = cx + Math.cos(a) * rr, z = cz + Math.sin(a) * rr;
+        if (!kit.clear(x, z, 19)) continue; const s = 2 + rng() * 4;
+        ib.frustum(x, gy + 0.05, z, s, s * 0.9, 0.5 + rng() * 0.5, 6, kit.mix(col(0xe8f6ff), col(0xbfe4fa), rng()), rng() * 3);
+      }
+      for (let n = 0; n < 5; n++) { const a = rng() * TAU, rr = rng() * lk.r * 0.7, x = cx + Math.cos(a) * rr, z = cz + Math.sin(a) * rr; if (kit.clear(x, z, 19)) sheen.push([x, gy, z, 5 + rng() * 6, 0xffffff]); }
+    }
+    kit.mesh(cb, { transparent: true, opacity: 0.8, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }, true);
+    pools(kit, sheen, { alpha: 0.5 });
+    { const f = kit.frame(dLake); kit.particles({ x: f.x, y: gy + 0.5, z: f.z, count: 220, vel: [0, 0.05, 0], spread: [0.1, 0.05, 0.1], jitter: [90, 0.4, 90], life: 1.6, size: 0.9, alpha: 1, pow: 0.5, fadeIn: 0.3, color: [0xffffff, 0xcdf0ff], tex: 'spark', additive: true }); }
+    // ---------------- adverts along the road
+    {
+      const ads = Ads(kit, [
+        { t: 'FROSTBITE', sub: 'ICE-COLD COLA', fg: '#ffffff', bg: '#d6283a', bg2: '#8a1020', ic: 'flake' }, { t: "POLAR PETE'S", sub: 'SNOW GEAR', fg: '#ffd23a', bg: '#1d4fa8', bg2: '#102a66', ic: 'star' },
+        { t: 'SNOWCAT', sub: 'WINTER TIRES', fg: '#35e0ff', bg: '#1b1f2e', bg2: '#0a0c14', ic: 'ring' }, { t: 'ICEBERG BANK', sub: 'SAVE COOL', fg: '#ffffff', bg: '#17806a', bg2: '#0d4a3e', ic: 'diamond' },
+        { t: 'MINT-O-FRESH', sub: 'GUM', fg: '#ffffff', bg: '#2fb08a', bg2: '#157a5c', ic: 'leaf' }, { t: 'AURORA AIR', sub: 'FLY NORTH', fg: '#b8ffea', bg: '#4a2a8a', bg2: '#241050', ic: 'wave' },
+        { t: 'SLEDWORKS', sub: 'RACE TO WIN', fg: '#ffffff', bg: '#ff8a1a', bg2: '#b34a00', ic: 'bolt' }, { t: 'COCOA CABIN', sub: 'HOT & SWEET', fg: '#ffe6c0', bg: '#6a3a22', bg2: '#3a1c0e', ic: 'flame' },
+      ]);
+      let n = 0;
+      for (let d = 30; d < L - 30; d += 44) for (const sd of [-1, 1]) { const f = kit.frame(d), p = kit.at(d, sd * 20.2, 0); ads.board(p[0], p[1], p[2], Math.atan2(f.tx, f.tz) + (sd > 0 ? Math.PI / 2 : -Math.PI / 2), 6, 1.6, (n++) % 8, 0x2a2f3a, 0.9); }
+      ads.finish();
+      // road paint: start-grid boxes, sponsor logos on the tarmac
+      const gb = new kit.Batch(); gridBoxes(kit, gb);
+      kit.mesh(gb, {}, true);
+    }
+    // ---------------- lamp posts along the road
+    for (let d = 20; d < L - 10; d += 52) for (const sd of [-1, 1]) {
+      const f = kit.frame(d), p = kit.at(d, sd * 19.5, 0);
+      lampPost(b, p[0], p[1], p[2], Math.atan2(f.tx, f.tz), 4.6, col(0x2c3646), col(0xfff0c0), lights, -sd);
+    }
+    // ---------------- far mountain range (layered, tinted by distance)
+    kit.farScatter(16, 150, (x, z, r) => {
+      const s = 36 + r() * 46, h = s * (1.6 + r() * 1.0), c = kit.mix(col(0x7f9bcb), col(0xb7cdea), r());
+      b.frustum(x, gy - 3, z, s, s * 0.35, h * 0.55, 7, c, r() * 3); b.frustum(x, gy - 3 + h * 0.55, z, s * 0.35, 0, h * 0.5, 7, kit.mix(c, white, 0.35), 0);
+      b.frustum(x, gy - 3 + h * 0.62, z, s * 0.22, 0, h * 0.4, 7, white, 0);
+    });
+    kit.mesh(b, {}, false);
+    kit.mesh(ib, { emissive: 0x2a6aa0, transparent: true, opacity: 0.93 }, false);
+    kit.foliage(pf, { strength: 0.3, heightScale: 0.16 });
+    { const wm = kit.mesh(wb, {}, true); if (wm) kit.blinker(wm.material, 7, { mode: 'sine', lo: 0.82 }); }
+    halos(kit, lights.map((p) => [p[0], p[1], p[2], p[3] !== undefined ? p[3] : 0xffe2a0]), { size: 5, alpha: 0.7 });
+    pools(kit, lights.filter((p) => p[3] === undefined).map((p) => [p[0], gy, p[2], 5, 0xffd9a0]), { normal: true, alpha: 0.25 });
+    if (smoke.length) kit.particles({ emitters: smoke, count: 8, vel: [0.5, 1.6, 0.2], spread: [0.3, 0.3, 0.3], life: 4, size: 2.4, grow: 2.4, alpha: 0.5, pow: 1.2, wob: 0.8, color: [0xffffff, 0xdde8f2] });
   }
 
   function frostyHazards(dLake, dCave) {
@@ -848,7 +1036,119 @@
         for (const sd of [-1, 1]) kit.crowdStand({ d0: L - 50, d1: L + 70, side: sd, l0: HW + 4 + 3.2, rows: 2, gap: 1.3, rise: 0, step: 2.4, scale: 1.1, radius: 55, colors: [0xff3df0, 0x3df2ff, 0xffe14a, 0x8f6bff, 0xffffff] });
         for (const d of [L * 0.03, L * 0.27, L * 0.55, L * 0.88]) { const f = kit.frame(d), hy = Math.atan2(f.tx, f.tz); kit.banner(f.x, f.y + 4.2, f.z, 5, 4, hy, d % 2 ? [0xff3df0, 0x3df2ff] : [0x3df2ff, 0xff3df0], { pattern: 'vstripes' }); }
       }
+      metroExtra(kit, bldgs);
     };
+  }
+
+  // ---- Neon Metro beauty pass: billboards, rooftop crowns, viaduct, wet-road glow, street furniture, blimp
+  function metroExtra(kit, bldgs) {
+    const rng = kit.rng, col = kit.col, gy = kit.groundY, L = kit.length, HW = METRO_HW;
+    const neon = [0xff3df0, 0x3df2ff, 0xffe14a, 0x8f6bff];
+    const ads = Ads(kit, [
+      { t: 'NEONCOLA', sub: 'TASTE THE VOLT', fg: '#ffffff', bg: '#e0208a', bg2: '#6a0a4a', ic: 'bolt' }, { t: 'RAMEN-YA', sub: 'OPEN 24H', fg: '#ffe14a', bg: '#d6322a', bg2: '#7a1410', ic: 'flame' },
+      { t: 'ZENITH HOTEL', sub: 'SKY SUITES', fg: '#9ff6ff', bg: '#1a2a6a', bg2: '#0a1038', ic: 'diamond' }, { t: 'TURBO TUNES', sub: 'LIVE MUSIC', fg: '#ffffff', bg: '#7a3af0', bg2: '#341080', ic: 'wave' },
+      { t: 'GLITCH GAMES', sub: 'PLAY LOUD', fg: '#3dff9a', bg: '#10202a', bg2: '#050a10', ic: 'star' }, { t: 'MOTOR CLUB', sub: 'EST. 2099', fg: '#ffe14a', bg: '#2a2a34', bg2: '#101014', ic: 'ring' },
+      { t: 'SKYLINE BANK', sub: 'RISE ABOVE', fg: '#ffffff', bg: '#127a8a', bg2: '#08404a', ic: 'diamond' }, { t: 'BUBBLE POP', sub: 'TEA & MORE', fg: '#ffffff', bg: '#ff7ab8', bg2: '#b83a7a', ic: 'circle' },
+      { t: 'HYPERLINK', sub: 'FIBER CITY', fg: '#ffffff', bg: '#2a6af0', bg2: '#0a2a80', ic: 'ring' }, { t: 'NIGHT OWL', sub: 'COFFEE BAR', fg: '#ffd9a0', bg: '#3a2a1e', bg2: '#1a100a', ic: 'leaf' },
+      { t: 'VOLT ENERGY', sub: 'CHARGE UP', fg: '#10202a', bg: '#c8ff3a', bg2: '#7ab800', ic: 'bolt' }, { t: 'KARAOKE KING', sub: 'SING ALL NIGHT', fg: '#ffffff', bg: '#a02ad0', bg2: '#501070', ic: 'star' },
+    ]);
+    const halo = [], lamps = [], streak = new kit.Batch(true);
+    // giant stilt billboards facing the road + rooftop boards on near towers
+    let n = 0;
+    for (let d = 52; d < L - 40; d += 96 + rng() * 30) {
+      const sd = (n & 1) ? -1 : 1, f = kit.frame(d), p = kit.at(d, sd * (HW + 4 + 17), 0), hy = Math.atan2(f.tx, f.tz) + (sd > 0 ? Math.PI / 2 : -Math.PI / 2);
+      ads.board(p[0], p[1], p[2], hy, 18, 5.6, n % 12, 0x20222e, 15);
+      halo.push([p[0] - Math.sin(hy) * 0.5, p[1] + 17.6, p[2] - Math.cos(hy) * 0.5, neon[n & 3]]); n++;
+    }
+    for (const bd of bldgs) {
+      if (bd.h < 45 || kit.clear(bd.x, bd.z, 80) || rng() < 0.4) continue;
+      const nr = nearRoad(kit, bd.x, bd.z), ex = Math.max(bd.w, bd.dp) / 2 + 0.4;
+      const px = bd.x + Math.sin(nr.ang) * ex, pz = bd.z + Math.cos(nr.ang) * ex;
+      ads.board(px, gy + bd.h - 6, pz, nr.ang, Math.min(13, bd.w * 0.8), 3.2, (n++) % 12, 0x20222e, 0);
+    }
+    for (let d = 20; d < L - 20; d += 41) for (const sd of [-1, 1]) {
+      const f = kit.frame(d), p = kit.at(d, sd * (HW + 4.6), 0);
+      ads.board(p[0], p[1], p[2], Math.atan2(f.tx, f.tz) + (sd > 0 ? Math.PI / 2 : -Math.PI / 2), 6.4, 1.6, (n++) % 12, 0x2a2f44, 1.0);
+    }
+    ads.finish();
+    // rooftop crowns: setbacks, tanks, neon rings
+    const rb = new kit.Batch(), rn = new kit.Batch();
+    for (const bd of bldgs) {
+      if (bd.h < 50 || rng() < 0.5) continue;
+      const k = kit.mix(col(0x1c2040), col(0x2a2a5a), rng()), cw = bd.w * (0.45 + rng() * 0.2), cd = bd.dp * (0.45 + rng() * 0.2), ch = 5 + rng() * 9, y = gy + bd.h;
+      rb.box(bd.x, y, bd.z, cw, ch, cd, 0, k);
+      rn.box(bd.x, y + ch, bd.z, cw + 0.3, 0.5, cd + 0.3, 0, col(neon[(rng() * 4) | 0]));
+      if (rng() < 0.4) rb.box(bd.x + bd.w * 0.25, y, bd.z - bd.dp * 0.25, 2.4, 3.6, 2.4, 0, col(0x5a5a74));
+      if (bd.h > 70 && rng() < 0.6) halo.push([bd.x, y + ch + 1, bd.z, neon[(rng() * 4) | 0]]);
+    }
+    kit.mesh(rb, {}, false);
+    { const m = kit.mesh(rn, {}, true); if (m) kit.blinker(m.material, 3.4, { mode: 'sine', lo: 0.55 }); }
+    // elevated rail viaduct parallel to the boulevard (deck, pillars, glowing rails)
+    {
+      const vb = new kit.Batch(), vn = new kit.Batch(), dk = col(0x34385a), dk2 = col(0x2a2e4a);
+      for (const [d0, d1, sd] of [[L * 0.05, L * 0.2, 1], [L * 0.52, L * 0.66, -1]]) {
+        const lat = sd * 31;
+        for (let d = d0; d < d1; d += 4) {
+          const a = kit.at(d, lat - 2.6, 10), b2 = kit.at(d + 4, lat - 2.6, 10), c = kit.at(d + 4, lat + 2.6, 10), e = kit.at(d, lat + 2.6, 10);
+          vb.quad(a, b2, c, e, dk);
+          const a2 = kit.at(d, lat - 2.6, 8.8), b3 = kit.at(d + 4, lat - 2.6, 8.8), c3 = kit.at(d + 4, lat + 2.6, 8.8), e3 = kit.at(d, lat + 2.6, 8.8);
+          vb.quad(a2, a, b2, b3, dk2); vb.quad(c3, c, e, e3, dk2); vb.quad(e3, e, a, a2, dk2);
+          for (const o of [-1.1, 1.1]) { const r0 = kit.at(d, lat + o, 10.1), r1 = kit.at(d + 4, lat + o, 10.1); vn.quad([r0[0], r0[1], r0[2]], [r1[0], r1[1], r1[2]], [r1[0], r1[1] + 0.15, r1[2]], [r0[0], r0[1] + 0.15, r0[2]], col(0x7af2ff)); }
+          const w0 = kit.at(d, lat - 2.7, 10), w1 = kit.at(d + 4, lat - 2.7, 10); vn.quad(w0, w1, [w1[0], w1[1] + 0.35, w1[2]], [w0[0], w0[1] + 0.35, w0[2]], col(0xff3df0));
+        }
+        for (let d = d0 + 6; d < d1; d += 14) { const p = kit.at(d, lat, -1), q = kit.at(d, lat, 8.8), f = kit.frame(d); vb.box(p[0], p[1], p[2], 2.2, q[1] - p[1], 2.2, Math.atan2(f.tx, f.tz), col(0x3c4068)); vb.box(q[0], q[1] - 0.8, q[2], 7, 0.8, 2.4, Math.atan2(f.tx, f.tz) + Math.PI / 2, dk); }
+        // train that shuttles along the viaduct
+        const tb = new kit.Batch(), cols = [0xe8e8f4, 0xff3df0, 0x3df2ff];
+        for (let c = 0; c < 3; c++) { tb.box(0, 0, c * 9.4, 3.2, 3, 9, 0, col(0xdfe3f2)); tb.box(0, 1.0, c * 9.4, 3.3, 0.8, 8, 0, [1, 0.9, 0.55]); tb.box(0, 2.9, c * 9.4, 3.4, 0.2, 9, 0, col(cols[c])); }
+        const tm = new T.Mesh(kit.trackGeom(tb.build()), kit.mat({}, true)); const f0 = kit.frame((d0 + d1) / 2); tm.position.set(f0.x + f0.rx * lat, f0.y + 10.2, f0.z + f0.rz * lat); tm.rotation.y = Math.atan2(f0.tx, f0.tz); tm.frustumCulled = false; kit.add(tm);
+        kit.slide(tm, f0.tx * (d1 - d0) * 0.35, 0, f0.tz * (d1 - d0) * 0.35, 0.18);
+      }
+      kit.mesh(vb, {}, false); kit.mesh(vn, {}, true);
+    }
+    // street furniture beyond the barrier: bus shelters, benches, bins, hydrants, phone booths
+    const fb = new kit.Batch(), fg = new kit.Batch(), gl = [];
+    for (let d = 14; d < L - 10; d += 23 + rng() * 10) for (const sd of [-1, 1]) {
+      if (rng() < 0.35) continue;
+      const f = kit.frame(d), hy = Math.atan2(f.tx, f.tz), p = kit.at(d, sd * (HW + 4 + 2.4 + rng() * 1.5), 0), face = hy + (sd > 0 ? Math.PI / 2 : -Math.PI / 2), r = rng();
+      if (r < 0.3) { // bus shelter with lit ad
+        fb.box(p[0], p[1], p[2], 4.4, 0.2, 1.8, hy, col(0x30344c)); fb.box(p[0], p[1] + 2.5, p[2], 4.6, 0.2, 2.0, hy, col(0x4a4f78));
+        for (const o of [-2, 2]) { const q = [p[0] + Math.sin(hy) * 0, p[1], p[2]]; fb.box(q[0] + Math.cos(hy) * o, p[1], q[2] - Math.sin(hy) * o, 0.14, 2.5, 0.14, hy, col(0x30344c)); }
+        const bk = [p[0] + Math.sin(face) * -0.8, p[2] + Math.cos(face) * -0.8]; fg.box(bk[0], p[1] + 0.5, bk[1], 3.6, 1.8, 0.1, face, [0.45, 0.95, 1]);
+        gl.push([p[0], p[1] + 1.5, p[2], 0x3df2ff]);
+      } else if (r < 0.55) { fb.box(p[0], p[1] + 0.5, p[2], 2.2, 0.16, 0.7, hy, col(0x6a4a2e)); fb.box(p[0], p[1] + 0.9, p[2] + 0, 2.2, 0.5, 0.12, hy, col(0x6a4a2e)); for (const o of [-0.9, 0.9]) fb.box(p[0] + Math.cos(hy) * o, p[1], p[2] - Math.sin(hy) * o, 0.14, 0.55, 0.5, hy, col(0x30344c)); }
+      else if (r < 0.75) { fb.frustum(p[0], p[1], p[2], 0.42, 0.42, 1.0, 8, col(0x3c5a4a), 0); fb.frustum(p[0], p[1] + 1.0, p[2], 0.5, 0.35, 0.2, 8, col(0x20302a), 0); }
+      else if (r < 0.9) { fb.box(p[0], p[1], p[2], 1.3, 2.7, 1.3, hy, col(0x2a3a8a)); fg.box(p[0] + Math.sin(face) * 0.66, p[1] + 0.9, p[2] + Math.cos(face) * 0.66, 0.9, 1.4, 0.08, face, [0.6, 1, 1]); gl.push([p[0], p[1] + 1.6, p[2], 0x7af2ff]); }
+      else { fb.frustum(p[0], p[1], p[2], 0.22, 0.26, 0.8, 8, col(0xe8383d), 0); fb.blob(p[0], p[1] + 0.85, p[2], 0.26, 0.22, 0.26, col(0xe8383d), 0); }
+    }
+    kit.mesh(fb, {}, false); kit.mesh(fg, {}, true);
+    // wet-road reflections: stretched neon glints on the tarmac + lamp pools
+    for (let d = 8, i = 0; d < L - 12; d += 8.5, i++) {
+      const l = (((i * 7) % 5) - 2) * 4.6 + (rng() - 0.5) * 2, c = col(neon[(i * 3 + ((rng() * 2) | 0)) & 3]), w = 1.3 + rng() * 1.6, len = 8 + rng() * 6, y = 0.1;
+      const k = [c[0] * 0.5, c[1] * 0.5, c[2] * 0.5];
+      streak.quadUV(kit.at(d, l - w, y), kit.at(d, l + w, y), kit.at(d + len, l + w, y), kit.at(d + len, l - w, y), k, [0, 0, 1, 0, 1, 1, 0, 1]);
+    }
+    { const m = kit.mesh(streak, { map: softMap(kit), transparent: true, blending: ADD, depthWrite: false, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }, true); if (m) { m.renderOrder = 3; kit.blinker(m.material, 5, { mode: 'sine', lo: 0.6 }); } }
+    for (let d = 20; d < L - 10; d += 38) for (const sd of [-1, 1]) { const f = kit.frame(d), l = sd * (HW + 4 + 2.2); lamps.push([f.x + f.rx * (l - sd * 1.6), f.y + 9.4, f.z + f.rz * (l - sd * 1.6), 0xffe6b0]); }
+    halos(kit, lamps, { size: 8, alpha: 0.7, fog: false });
+    pools(kit, lamps.map((p) => [p[0], p[1] - 9.4, p[2], 9, 0xffd890]), { alpha: 0.5 });
+    halos(kit, halo, { size: 26, alpha: 0.55, fog: false });
+    halos(kit, gl, { size: 6, alpha: 0.6, fog: false });
+    // blimp with a brand plate drifting over the skyline
+    {
+      const bb = new kit.Batch(); bb.blob(0, 0, 0, 7, 6, 22, col(0xdfe3f2), 1);
+      for (const a of [0, 1.5708, 3.1416, 4.712]) bb.box(Math.cos(a) * 3, Math.sin(a) * 3 - 0.3, -20, 0.3, 0.3, 0, 0, col(0x3df2ff)), bb.box(Math.cos(a) * 3.2, Math.sin(a) * 3.2, -19, a & 1 ? 0.3 : 5, a & 1 ? 5 : 0.3, 5, 0, col(0xff3df0));
+      bb.box(0, -6.6, 2, 2.2, 1.2, 5, 0, col(0x2a2a3a));
+      const grp = new T.Group(), body = new T.Mesh(kit.trackGeom(bb.build()), kit.mat({})); grp.add(body);
+      if (ads.map) {
+        for (const sd of [-1, 1]) {
+          const pg = kit.trackGeom(new T.PlaneGeometry(22, 5.5)), u0 = 0.5, v1 = 1 - 2 / ads.rows, uv = pg.attributes.uv;
+          for (let q = 0; q < 4; q++) uv.setXY(q, u0 + (q & 1) * 0.5, v1 - (1 / ads.rows) * (q < 2 ? 1 : 0));
+          const pm = new T.Mesh(pg, kit.trackMat(new T.MeshBasicMaterial({ map: ads.map, side: T.DoubleSide }))); pm.rotation.y = sd * Math.PI / 2; pm.position.set(sd * 6.4, 0.3, 0); grp.add(pm);
+        }
+      }
+      grp.position.set(120, 120, 120); kit.add(grp); kit.bob(grp, 2.5, 0.3, 0, 0.02);
+      kit.slide(grp, 90, 0, 40, 0.03);
+    }
   }
 
   function metroHazards(S) {
@@ -1191,8 +1491,8 @@
         // dorsal spines along the spine
         for (let u = 70; u < SP.U - 24; u += 7) {
           const i = Math.round(u / 2), x = SP.sx[i], z = SP.sz[i], h = terrH(x, z), s = 0.8 + 0.9 * (SP.sw[i] / 32);
-          const c = (Math.floor(u / 7) & 1) ? col(0xff9a3d) : col(0xffd23d);
-          b.frustum(x, h - 0.2, z, 1.35 * s, 0, 5.6 * s, 4, c, u);
+          const c = (Math.floor(u / 7) & 1) ? col(0x2fa86a) : col(0xffd23d);
+          b.frustum(x, h - 0.2, z, 1.0 * s, 0, 3.8 * s, 6, c, u);
         }
       }
       kit.mesh(b, {}, false);
@@ -1267,7 +1567,104 @@
         }
         kit.mesh(jb, {}, false);
       }
+      serpentExtra(kit, { terrH, nearSp, nr, sprinkle, bbx0, bbx1, bbz0, bbz1 });
     };
+  }
+
+  // ---- Serpent Coast beauty pass: jungle canopy, beach huts, sea arches, islands, torches, adverts, bunting
+  function serpentExtra(kit, X) {
+    const rng = kit.rng, col = kit.col, SP = SERP, edge = SERP_HW + SERP_SH, L = kit.length, { terrH, nearSp, nr, sprinkle } = X;
+    const cx = (X.bbx0 + X.bbx1) / 2, cz = (X.bbz0 + X.bbz1) / 2;
+    const b = new kit.Batch(), fb = new kit.Batch(), tk = [], halo = [];
+    const trunk = col(0x8a5a30), leaf = [col(0x1f8a3a), col(0x2fa84a), col(0x46c25a), col(0x1a7a4a)], pet = [col(0xff4f7a), col(0xffd23a), col(0xff8a3d), col(0xffffff)];
+    // broadleaf jungle canopy with blossoms
+    sprinkle(170, 4000, (x, z) => {
+      const h = terrH(x, z); nearSp(x, z);
+      if (h < 1.4 || nr.dist < SP.sw[nr.i] + 4 || !kit.clear(x, z, 18.5)) return false;
+      const s = 0.8 + rng() * 0.9, lean = (rng() - 0.5) * 1.4, ht = (6 + rng() * 4) * s;
+      tube(fb, [x, h - 0.5, z], [x + lean, h + ht, z], 0.5 * s, 0.3 * s, 5, trunk);
+      for (let k = 0; k < 3; k++) fb.blob(x + lean + (rng() - 0.5) * 3.6 * s, h + ht + (rng() - 0.2) * s, z + (rng() - 0.5) * 3.6 * s, 3.4 * s, 1.7 * s, 3.4 * s, leaf[(rng() * 4) | 0], 0);
+      if (rng() < 0.35) for (let k = 0; k < 4; k++) fb.blob(x + lean + (rng() - 0.5) * 5 * s, h + ht + 1.3 * s, z + (rng() - 0.5) * 5 * s, 0.5, 0.4, 0.5, pet[(rng() * 4) | 0], 0);
+      return true;
+    });
+    // flowering hedges hugging the fence line
+    for (let d = 5, i = 0; d < L - 5; d += 13 + rng() * 6, i++) for (const sd of [-1, 1]) {
+      const p = kit.at(d, sd * (edge + 4.5 + rng() * 2), 0), h = terrH(p[0], p[2]); if (h < 1.3) continue;
+      const c = pet[(rng() * 4) | 0];
+      fb.blob(p[0], h + 0.5, p[2], 1.6, 0.9, 1.4, leaf[i & 3], 0);
+      for (let k = 0; k < 3; k++) fb.blob(p[0] + (rng() - 0.5) * 2.2, h + 1.0 + rng() * 0.4, p[2] + (rng() - 0.5) * 1.6, 0.42, 0.34, 0.42, c, 0);
+    }
+    // beach: tiki huts, umbrellas, towels
+    let huts = 0, umb = 0;
+    sprinkle(26, 6000, (x, z) => {
+      const h = terrH(x, z); nearSp(x, z);
+      if (h < 0.25 || h > 1.1 || nr.dist < SP.sw[nr.i] + 9 || !kit.clear(x, z, 21)) return false;
+      if (huts < 7 && rng() < 0.4) {
+        huts++; const ry = rng() * TAU;
+        b.box(x, h - 0.2, z, 4.4, 0.4, 4.4, ry, col(0xb08a5a));
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) b.box(x + rotX(sx * 1.9, sz * 1.9, ry), h, z + rotZ(sx * 1.9, sz * 1.9, ry), 0.22, 2.3, 0.22, ry, trunk);
+        b.frustum(x, h + 2.2, z, 3.6, 0, 2.2, 8, col(0xd9b45a), 0); b.frustum(x, h + 2.2, z, 3.8, 3.4, 0.3, 8, col(0xb08a3a), 0);
+        b.box(x + 2.6, h, z, 0.14, 1.5, 0.14, 0, trunk); tk.push([x + 2.6, h + 1.7, z]);
+      } else {
+        umb++; const c = [col(0xff4f4f), col(0xffd23a), col(0x3da8ff), col(0xffffff)][umb & 3];
+        b.box(x, h, z, 0.1, 2.6, 0.1, 0, col(0xf4efe0)); b.frustum(x, h + 2.4, z, 1.9, 0, 0.8, 8, c, 0);
+        b.box(x + 1.3, h + 0.02, z + 0.6, 1.0, 0.06, 2.0, rng() * 1.5, col(0x3da8ff)); b.box(x - 1.6, h + 0.02, z - 0.4, 1.0, 0.06, 2.0, rng() * 1.5, col(0xff9a3d));
+      }
+      return true;
+    });
+    // rock arches and sea stacks in the shallows
+    let arches = 0, stacks = 0;
+    for (let t = 0; t < 400 && (arches < 4 || stacks < 9); t++) {
+      const x = X.bbx0 - 120 + rng() * (X.bbx1 - X.bbx0 + 240), z = X.bbz0 - 120 + rng() * (X.bbz1 - X.bbz0 + 240);
+      if (terrH(x, z) > 0.05) continue; nearSp(x, z);
+      const dd = nr.dist - SP.sw[nr.i]; if (dd < 32 || dd > 110) continue;
+      const rk = [col(0xb09a78), col(0x9a8664), col(0xc4ae8a)];
+      if (arches < 4 && rng() < 0.4) {
+        arches++; const a = rng() * TAU, sp = 7;
+        for (const sg of [-1, 1]) { const px = x + Math.cos(a) * sp * sg, pz = z + Math.sin(a) * sp * sg; b.frustum(px, -1.5, pz, 5.2, 3.2, 12, 8, rk[0], 0); b.blob(px, 10.5, pz, 4.2, 2.4, 4.2, col(0x3fa050), 0); }
+        b.blob(x, 9.5, z, 8.5, 2.2, 3.4, rk[1], 0);
+      } else if (stacks < 9) { stacks++; const h = 6 + rng() * 10; b.frustum(x, -1.5, z, 3.4 + rng() * 2, 1.8, h, 7, rk[(rng() * 3) | 0], rng()); b.blob(x, h - 1.5, z, 2.6, 1.2, 2.6, col(0x3fa050), 0); }
+    }
+    // far volcanic islands with falls
+    for (let k = 0; k < 9; k++) {
+      const a = (k / 9) * TAU + rng() * 0.4, r = 480 + rng() * 380, ix = cx + Math.cos(a) * r, iz = cz + Math.sin(a) * r, s = 40 + rng() * 40, hh = 40 + rng() * 60;
+      b.blob(ix, -3, iz, s * 1.5, 7, s * 1.2, col(0xe8d59a), 1);
+      b.frustum(ix, 0, iz, s, s * 0.22, hh, 9, kit.mix(col(0x2f8f4a), col(0x6aa05a), rng()), rng() * 3);
+      b.frustum(ix, hh * 0.7, iz, s * 0.45, 0, hh * 0.45, 9, col(0x7a7a6a), 0);
+      b.box(ix + s * 0.3, 2, iz - s * 0.2, 3, hh * 0.7, 1.2, a, col(0xdff6ff));
+      for (let q = 0; q < 6; q++) b.blob(ix + (rng() - 0.5) * s * 1.1, 6, iz + (rng() - 0.5) * s, 6, 4, 6, col(0x2f9a3a), 0);
+    }
+    kit.mesh(b, {}, false); kit.foliage(fb, { strength: 0.4, heightScale: 0.18 });
+    // tiki torches along the roadside + lanterns on huts
+    for (let d = 20; d < L - 10; d += 30) for (const sd of [-1, 1]) {
+      const p = kit.at(d, sd * (edge + 1.8), 0); if (terrH(p[0], p[2]) < 1.2) continue;
+      tk.push([p[0], p[1] + 2.2, p[2]]);
+    }
+    {
+      const tb = new kit.Batch();
+      for (const q of tk) { const h = terrH(q[0], q[2]); tb.box(q[0], q[1] - 1.7, q[2], 0.14, 1.7, 0.14, 0, trunk); tb.box(q[0], q[1] - 0.1, q[2], 0.4, 0.2, 0.4, 0, col(0x4a3a2a)); halo.push([q[0], q[1] + 0.4, q[2], 0xffa040]); }
+      kit.mesh(tb, {}, false);
+      if (tk.length) kit.particles({ emitters: tk.map((q) => [q[0], q[1] + 0.1, q[2]]), count: 5, vel: [0, 1.6, 0], spread: [0.15, 0.4, 0.15], life: 0.7, size: 0.8, grow: -0.5, alpha: 0.95, color: [0xffa030, 0xffd060, 0xff6a20], additive: true });
+      halos(kit, halo, { size: 5, alpha: 0.55 });
+    }
+    // sparkling sea
+    kit.particles({ x: cx, y: 0.5, z: cz, count: 420, vel: [0, 0.05, 0], spread: [0.1, 0.05, 0.1], jitter: [380, 0.2, 330], life: 1.5, size: 1.3, alpha: 1, pow: 0.5, fadeIn: 0.3, color: [0xffffff, 0xbff4ff], tex: 'spark', additive: true });
+    // adverts along the fence, bunting along the start straight, road paint
+    {
+      const ads = Ads(kit, [
+        { t: 'COCO COAST', sub: 'RESORT & SPA', fg: '#ffffff', bg: '#16a0b8', bg2: '#0a5a78', ic: 'wave' }, { t: 'SERPENT SODA', sub: 'BITE OF FIZZ', fg: '#ffe14a', bg: '#2a9a3a', bg2: '#145a22', ic: 'flame' },
+        { t: 'TIKI TAN', sub: 'SUN LOTION', fg: '#ffffff', bg: '#f0822a', bg2: '#a04a0a', ic: 'circle' }, { t: 'REEF RIDERS', sub: 'SURF CLUB', fg: '#9ff6ff', bg: '#1a3a8a', bg2: '#0a1a50', ic: 'wave' },
+        { t: 'MANGO MAX', sub: 'JUICE BAR', fg: '#ffffff', bg: '#ff9a1a', bg2: '#c45a00', ic: 'leaf' }, { t: 'ISLAND AIR', sub: 'FLY THE COAST', fg: '#ffffff', bg: '#3a6ae0', bg2: '#1a2a90', ic: 'diamond' },
+        { t: 'BAIT & TACKLE', sub: 'FRESH CATCH', fg: '#ffe6c0', bg: '#6a3a22', bg2: '#3a1c0e', ic: 'ring' }, { t: 'SURF SHACK', sub: 'BOARDS', fg: '#ffffff', bg: '#e0388a', bg2: '#8a1050', ic: 'star' },
+      ]);
+      let n = 0;
+      for (let d = 26; d < L - 30; d += 56) { const sd = (n & 1) ? -1 : 1, f = kit.frame(d), p = kit.at(d, sd * (edge + 3.4), 0); ads.board(p[0], p[1] - 0.6, p[2], Math.atan2(f.tx, f.tz) + (sd > 0 ? Math.PI / 2 : -Math.PI / 2), 6, 1.6, (n++) % 8, 0x7a4a26, 0.9); }
+      ads.road(L - 62, 0, 9, 2.6, 0); ads.road(L - 118, 0, 9, 2.6, 1); ads.road(36, 0, 9, 2.6, 5);
+      ads.finish();
+      const gb = new kit.Batch(); gridBoxes(kit, gb); kit.mesh(gb, {}, true);
+      const bc = [[0xff4f7a, 0xffe14a, 0x3da8ff, 0xffffff]];
+      for (let d = 10; d < 130; d += 32) for (const sd of [-1, 1]) kit.bunting(kit.at(d, sd * (edge + 1), 6.0), kit.at(d + 32, sd * (edge + 1), 6.0), bc[0], 9, 0.9, 1.0);
+    }
   }
 
   // ====================================================================================================
@@ -1304,7 +1701,7 @@
       id: 'boulder_peak', name: 'Boulder Peak', cup: 'star', order: 4, laps: 3, music: 'mountain', seed: 5404,
       hw: PEAK_HW, shoulder: PEAK_SH, scale: 1, style: 'meadow', offroad: 'grass', walls: 'none',
       theme: {
-        sky: [0x3a86d8, 0xa9d8f2, 0xdcefe0], fog: [0xc6e2dc, 120, 560], ground: 0x2f7a35, shoulder: 0x6a8a3c,
+        sky: [0x2a74d0, 0x8fc8ec, 0xf0f0c8], fog: [0xc8e0c4, 120, 580], ground: 0x2f7a35, shoulder: 0x6a8a3c,
         road: [0x7c6b52, 0x74644c], curb: [0xd9c9a0, 0x8a6a3c], hemi: [0xe4f3ff, 0x6a8a50, 0.95], sun: [0xfff0d0, 0.9],
         emb: 0x7a6040, bg: 0xc6e2dc,
       },
@@ -1356,8 +1753,8 @@
         color: (x, z, h) => {
           const nz = 1 + (rng() - 0.5) * 0.12;
           if (h > 0 && h < 0.3) return kit.mul(col(0x2a2438), nz);              // ravine floor
-          if (h < 6) return kit.mul(col(((Math.floor(x / 9) + Math.floor(z / 9)) & 1) ? 0x3d9a3a : 0x338c35), nz);
-          if (h < 16) return kit.mul(col(((Math.floor(x / 7) + Math.floor(z / 7)) & 1) ? 0x5c8f3a : 0x6a8a3c), nz);
+          if (h < 6) return kit.mul(col(((Math.floor(x / 9) + Math.floor(z / 9)) & 1) ? 0x2f8236 : 0x287530), nz);
+          if (h < 16) return kit.mul(col(((Math.floor(x / 7) + Math.floor(z / 7)) & 1) ? 0x4f7f34 : 0x5a8438), nz);
           if (h < 27) return kit.mul(col(Math.floor(h / 3) & 1 ? 0x8a6c48 : 0x7e6140), nz);
           return kit.mul(col(Math.floor(h / 3) & 1 ? 0x8f8070 : 0x7f7262), nz);
         },
@@ -1545,7 +1942,154 @@
         const mm = new T.Mesh(mg, kit.trackMat(new T.MeshBasicMaterial({ color: 0xc8d6e0, transparent: true, opacity: 0.45, depthWrite: false })));
         mm.position.set(mf.x, 3.4, mf.z); kit.add(mm);
       }
+      peakExtra(kit, P, th);
     };
+  }
+
+  // ---- Boulder Peak beauty pass: tiki totems, scaffolds, cannon frame, waterfalls, volcano glow, jungle detail
+  function peakExtra(kit, P, th) {
+    const rng = kit.rng, col = kit.col, L = kit.length, HW = PEAK_HW, edge = PEAK_HW + PEAK_SH;
+    const dC0 = P.dCan + P.canLen, dC1 = P.dTo;
+    const b = new kit.Batch(), jt = new kit.Batch(), glow = new kit.Batch(), tk = [], halo = [], wood = [col(0x8a5a30), col(0x6a4424), col(0xa4703c)], rope = col(0xcdb27a);
+    const tcols = [[0xd24a3a, 0xf0c030, 0x2f8fd0, 0x2fa04a], [0x2f8fd0, 0xd24a3a, 0x2fa04a, 0xf0c030], [0xf0c030, 0x2fa04a, 0xd24a3a, 0x2f8fd0]];
+    // ---- original tiki-style totems: stacked carved blocks with eyes, teeth, wings and feather crowns
+    const totem = (x, y, z, ry, s, v) => {
+      const cs = tcols[v % 3], segs = 3 + (v & 1), R = (lx, lz) => [x + rotX(lx * s, lz * s, ry), z + rotZ(lx * s, lz * s, ry)];
+      for (let k = 0; k < segs; k++) {
+        const yk = y + k * 2.4 * s;
+        b.box(x, yk, z, 2.2 * s, 2.4 * s, 2.2 * s, ry, col(cs[(k + v) & 3]));
+        b.box(x, yk + 2.3 * s, z, 2.5 * s, 0.22 * s, 2.5 * s, ry, col(0x3a2a1e));
+        if ((k + v) & 1) {
+          for (const sg of [-1, 1]) { const w = R(sg * 2.0, 0); b.box(w[0], yk + 0.6 * s, w[1], 1.7 * s, 0.42 * s, 0.5 * s, ry + sg * 0.25, col(cs[(k + 2) & 3])); b.box(w[0], yk + 1.2 * s, w[1], 1.4 * s, 0.34 * s, 0.4 * s, ry + sg * 0.4, col(cs[(k + 1) & 3])); }
+        } else {
+          for (const sg of [-1, 1]) {
+            const e = R(sg * 0.55, 1.13), q = R(sg * 0.55, 1.2);
+            b.box(e[0], yk + 1.3 * s, e[1], 0.62 * s, 0.5 * s, 0.14, ry, [1, 1, 1]); b.box(q[0], yk + 1.38 * s, q[1], 0.26 * s, 0.3 * s, 0.12, ry, [0.05, 0.05, 0.08]);
+            const br = R(sg * 0.55, 1.15); b.box(br[0], yk + 1.85 * s, br[1], 0.8 * s, 0.14 * s, 0.14, ry + sg * 0.15, col(0x2a1a10));
+          }
+          const nz = R(0, 1.25); b.box(nz[0], yk + 0.75 * s, nz[1], 0.4 * s, 0.7 * s, 0.4 * s, ry, col(0xb04a2a));
+          const mo = R(0, 1.16); b.box(mo[0], yk + 0.12 * s, mo[1], 1.3 * s, 0.4 * s, 0.14, ry, col(0xc02a2a));
+          for (let t = -1; t <= 1; t++) { const tt = R(t * 0.4, 1.2); b.box(tt[0], yk + 0.3 * s, tt[1], 0.24 * s, 0.3 * s, 0.1, ry, [1, 1, 1]); }
+        }
+      }
+      const yt = y + segs * 2.4 * s;
+      for (let f = -2; f <= 2; f++) { const p = R(f * 0.45, 0); b.frustum(p[0], yt + 0.1, p[1], 0.32 * s, 0, (1.6 + (2 - Math.abs(f)) * 0.5) * s, 5, col(cs[(f + 6) & 3]), 0); }
+    };
+    // two big totems flanking the start, then pairs along the lowlands and the summit road
+    const tpos = [[-6, 0], [14, 1], [60, 2], [150, 0], [P.dCan - 120, 1], [P.dCan - 60, 2], [dC1 + 40, 0], [dC1 + 160, 1], [dC1 + 330, 2], [dC1 + 470, 0], [P.dBr1 + 70, 1], [L - 130, 2]];
+    tpos.forEach(([d0, v], i) => {
+      const d = (d0 + L) % L, sd = i & 1 ? 1 : -1, f = kit.frame(d), p = kit.at(d, sd * (edge + 3.2 + (i % 3)), 0), ry = Math.atan2(f.tx, f.tz) + (sd > 0 ? Math.PI / 2 : -Math.PI / 2);
+      totem(p[0], p[1] - 0.2, p[2], ry, (i < 4 ? 1.7 : 1.25) + (i % 3) * 0.15, v + i);
+    });
+    // ---- wooden scaffolds: tall support towers under the hanging causeway and viewing platforms
+    const scaffold = (x, y, z, ry, w, h, lev) => {
+      const R = (lx, lz) => [x + rotX(lx, lz, ry), z + rotZ(lx, lz, ry)], hw = w / 2;
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const c = R(sx * hw, sz * hw); b.box(c[0], y - 0.5, c[1], 0.45, h + 0.5, 0.45, ry, wood[0]); }
+      for (let l = 1; l <= lev; l++) {
+        const yy = y + (h * l) / lev - 0.3;
+        b.box(x, yy, z, w + 0.8, 0.28, w + 0.8, ry, wood[2]);
+        for (const sg of [-1, 1]) { const c0 = R(-hw, sg * hw), c1 = R(hw, sg * hw); b.box((c0[0] + c1[0]) / 2, yy + 0.3, (c0[1] + c1[1]) / 2, w, 0.14, 0.14, ry, wood[1]); b.box((c0[0] + c1[0]) / 2, yy + 1.0, (c0[1] + c1[1]) / 2, w, 0.14, 0.14, ry, wood[1]); }
+        if (l > 1 || lev === 1) {
+          const y0 = y + (h * (l - 1)) / lev, ya = R(-hw, -hw), yb = R(hw, -hw), yc = R(hw, hw), yd = R(-hw, hw);
+          tube(b, [ya[0], y0, ya[1]], [yb[0], yy, yb[1]], 0.1, 0.1, 4, wood[1]); tube(b, [yb[0], y0, yb[1]], [ya[0], yy, ya[1]], 0.1, 0.1, 4, wood[1]);
+          tube(b, [yc[0], y0, yc[1]], [yd[0], yy, yd[1]], 0.1, 0.1, 4, wood[1]); tube(b, [yd[0], y0, yd[1]], [yc[0], yy, yc[1]], 0.1, 0.1, 4, wood[1]);
+        }
+      }
+      const lad = R(hw + 0.45, 0);
+      for (let r = 0; r < h; r += 0.7) b.box(lad[0], y + r, lad[1], 0.1, 0.1, 1.0, ry + Math.PI / 2, wood[1]);
+      const tp = R(hw, hw); tk.push([tp[0], y + h + 1.8, tp[1]]); b.box(tp[0], y + h + 0.3, tp[1], 0.12, 1.5, 0.12, ry, wood[1]);
+    };
+    for (let d = dC0 + 36; d < dC1 - 20; d += 52) for (const sd of [-1, 1]) {
+      const f = kit.frame(d), p = kit.at(d, sd * (edge + 1.8), 0), gy = th(p[0], p[2]), hgt = Math.max(5, f.y - gy - 0.6);
+      scaffold(p[0], gy, p[2], Math.atan2(f.tx, f.tz), 3.2, hgt, Math.max(2, Math.round(hgt / 7)));
+    }
+    for (const [d, sd] of [[P.dCan - 100, 1], [P.dCan - 40, -1], [dC1 + 260, 1], [dC1 + 420, -1], [P.dBr1 + 40, 1]]) {
+      const f = kit.frame(d), p = kit.at(d, sd * (edge + 7), 0), gy = th(p[0], p[2]);
+      scaffold(p[0], gy, p[2], Math.atan2(f.tx, f.tz), 4, 8, 2);
+    }
+    // ---- giant cannon: spoked wheels, iron muzzle ring, fuse
+    {
+      const dW = P.dCan + 11, ir = col(0x4a4a52), rim = col(0x6a4424);
+      for (const sd of [-1, 1]) {
+        const cen = kit.at(dW, sd * (edge + 3.4), 6.6), pt = (a, r) => kit.at(dW + Math.cos(a) * r, sd * (edge + 3.4), 6.6 + Math.sin(a) * r);
+        for (let k = 0; k < 18; k++) { const a0 = (k / 18) * TAU, a1 = ((k + 1) / 18) * TAU; tube(b, pt(a0, 6.4), pt(a1, 6.4), 0.55, 0.55, 5, k & 1 ? rim : wood[0]); }
+        for (let k = 0; k < 8; k++) tube(b, cen, pt((k / 8) * TAU, 6.2), 0.32, 0.26, 4, wood[2]);
+        tube(b, kit.at(dW, sd * (edge + 3.0), 6.6), kit.at(dW, sd * (edge + 4.4), 6.6), 1.1, 1.1, 8, ir, true);
+      }
+      const gp = kit.at(P.dCan - 4, edge + 4, 0.2); tk.push([gp[0], gp[1] + 0.8, gp[2]]);
+      kit.particles({ x: gp[0], y: gp[1] + 0.6, z: gp[2], count: 14, vel: [0, 2.2, 0], spread: [0.8, 0.6, 0.8], life: 0.6, size: 0.6, grow: -0.4, alpha: 1, color: [0xffe060, 0xffffff, 0xff9030], tex: 'spark', additive: true });
+      const mz = kit.at(dC0 + 3, 0, 8); halo.push([mz[0], mz[1], mz[2], 0xffb050]);
+    }
+    // ---- waterfalls pouring down the slopes (merged flowing ribbons) + plunge pools
+    const falls = [[P.dTo + 120, 0], [P.dTo + 300, 0], [P.dBr1 + 110, 0], [P.dCan - 90, 0]];
+    for (const [d, _s] of falls) {
+      const f = kit.frame(d);
+      let best = -1, bl = 0;
+      for (const sd of [-1, 1]) { const q = kit.at(d, sd * 70, 0); const rise = th(q[0], q[2]) - f.y; if (rise > best) { best = rise; bl = sd; } }
+      if (best < 8) continue;
+      let l1 = edge + 10; while (l1 < 90 && th(kit.at(d, bl * l1, 0)[0], kit.at(d, bl * l1, 0)[2]) < f.y + 4) l1 += 3;
+      let l2 = l1; while (l2 < 110 && th(kit.at(d, bl * l2, 0)[0], kit.at(d, bl * l2, 0)[2]) < f.y + 26) l2 += 3;
+      const n = Math.max(3, Math.round((l2 - l1) / 4)), P3 = [], UV = [], I = [];
+      for (let i = 0; i <= n; i++) {
+        const l = lerp(l1, l2, i / n), c = kit.at(d, bl * l, 0), t = kit.frame(d), y = th(c[0], c[2]) + 0.7;
+        for (const w of [-3.6, 3.6]) P3.push(c[0] + t.tx * w, y, c[2] + t.tz * w);
+        UV.push(0, i / n, 1, i / n); if (i < n) { const q = i * 2; I.push(q, q + 1, q + 3, q, q + 3, q + 2); }
+      }
+      const g = kit.trackGeom(new T.BufferGeometry()); g.setAttribute('position', new T.Float32BufferAttribute(P3, 3)); g.setAttribute('uv', new T.Float32BufferAttribute(UV, 2)); g.setIndex(I);
+      const m = new T.Mesh(g, kit.flowMat('water', { speed: [0, 1.4], repeat: [1.5, 2.5], fallback: 0xbfeaff })); m.frustumCulled = false; kit.add(m);
+      const pc = kit.at(d, bl * (l1 - 2), 0), py = th(pc[0], pc[2]);
+      b.blob(pc[0], py + 0.2, pc[2], 6, 0.7, 6, col(0xcdf2ff), 1);
+      for (let k = 0; k < 5; k++) b.blob(pc[0] + (rng() - 0.5) * 6, py + 0.8, pc[2] + (rng() - 0.5) * 6, 1.6, 1.4, 1.6, [1, 1, 1], 0);
+      kit.particles({ x: pc[0], y: py + 1.2, z: pc[2], count: 22, vel: [0, 2.2, 0], spread: [2, 1, 2], jitter: [3, 0.4, 3], life: 2, size: 3.2, grow: 1.4, alpha: 0.35, pow: 1.1, color: [0xffffff, 0xdff6ff] });
+    }
+    // ---- rock spires and stratified cliffs on the slopes
+    kit.scatter(30, 26, 110, edge + 8, (x, z, i, r) => {
+      const h = th(x, z); if (h < 0.5) return;
+      const s = 1.2 + r() * 1.8, c = [col(0x8a7c6c), col(0x6a5c4c), col(0xa08a68), col(0x7a6a58)];
+      let y = h - 1; const segs = 2 + ((r() * 3) | 0);
+      for (let k = 0; k < segs; k++) { const hh = (4 + r() * 5) * s, r0 = (5.2 - k * 1.2) * s; b.frustum(x + (r() - 0.5) * s, y, z + (r() - 0.5) * s, r0, r0 * 0.55, hh, 7, c[(k + (r() * 2 | 0)) & 3], r() * 3); y += hh - 0.4; }
+      b.blob(x, y + 0.2, z, 2.4 * s, 1.0 * s, 2.4 * s, col(0x2f8a3a), 0);
+    });
+    // ---- extra jungle: banana plants, bamboo, flowering shrubs
+    kit.scatter(110, 2, 60, edge + 6, (x, z, i, r) => {
+      const h = th(x, z); if (h < 0.5 || h > 22) return;
+      const s = 0.9 + r() * 0.8, gcol = [col(0x2f9a3a), col(0x46b04a), col(0x1f7a3a)];
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * TAU + r(), c = Math.cos(a), sn = Math.sin(a), px = -sn * 0.7 * s, pz = c * 0.7 * s, k2 = gcol[k % 3];
+        const tip = [x + c * 3.4 * s, h + 1.4 * s, z + sn * 3.4 * s], mid = [x + c * 1.7 * s, h + 2.5 * s, z + sn * 1.7 * s];
+        jt.tri([x, h + 0.3, z], [mid[0] + px, mid[1], mid[2] + pz], [mid[0] - px, mid[1], mid[2] - pz], k2); jt.tri([mid[0] + px, mid[1], mid[2] + pz], tip, [mid[0] - px, mid[1], mid[2] - pz], k2);
+      }
+      if (r() < 0.45) { const fc = [col(0xff4f7a), col(0xffd23a), col(0xff8a3d)][(r() * 3) | 0]; for (let k = 0; k < 3; k++) jt.blob(x + (r() - 0.5) * 2, h + 0.9 + r() * 0.4, z + (r() - 0.5) * 2, 0.4, 0.3, 0.4, fc, 0); }
+    });
+    kit.scatter(34, 2, 50, edge + 8, (x, z, i, r) => {
+      const h = th(x, z); if (h < 0.5 || h > 20) return;
+      for (let k = 0; k < 5; k++) { const bx = x + (r() - 0.5) * 2.4, bz = z + (r() - 0.5) * 2.4, hh = 8 + r() * 5; tube(jt, [bx, h - 0.3, bz], [bx + (r() - 0.5) * 0.8, h + hh, bz], 0.16, 0.1, 4, kit.mix(col(0x8ac04a), col(0xc4d86a), r())); }
+    });
+    // ---- adverts + road paint
+    {
+      const ads = Ads(kit, [
+        { t: 'BOULDER BRAND', sub: 'ROCK SOLID ENERGY', fg: '#ffe14a', bg: '#8a4a22', bg2: '#4a2410', ic: 'diamond' }, { t: 'TIKI TREATS', sub: 'JUNGLE SNACKS', fg: '#ffffff', bg: '#2fa04a', bg2: '#145a22', ic: 'leaf' },
+        { t: 'CANNON CO.', sub: 'LAUNCH DAY EVERY DAY', fg: '#ffffff', bg: '#3a3a46', bg2: '#16161c', ic: 'ring' }, { t: 'PEAK CLIMBERS', sub: 'ROPES & GEAR', fg: '#ffffff', bg: '#d24a3a', bg2: '#7a1a14', ic: 'star' },
+        { t: 'LAVA LAMPS', sub: 'GLOW AT HOME', fg: '#ffe14a', bg: '#e8581a', bg2: '#8a2a00', ic: 'flame' }, { t: 'MONKEY MIX', sub: 'TROPICAL TRAIL MIX', fg: '#ffffff', bg: '#2f8fd0', bg2: '#12508a', ic: 'circle' },
+      ]);
+      let n = 0;
+      for (const d of [30, 90, 150, P.dCan - 150, P.dCan - 100, P.dTo + 30, P.dTo + 240, P.dBr1 + 150, L - 80, L - 30]) {
+        const sd = (n & 1) ? -1 : 1, f = kit.frame(d), p = kit.at(d, sd * (edge + 2.2), 0);
+        ads.board(p[0], p[1] - 0.2, p[2], Math.atan2(f.tx, f.tz) + (sd > 0 ? Math.PI / 2 : -Math.PI / 2), 6, 1.6, (n++) % 6, 0x6a4424, 0.9);
+      }
+      ads.road(L - 60, 0, 10, 2.8, 0); ads.road(P.dCan - 60, 0, 10, 2.8, 2);
+      ads.finish();
+      const gb = new kit.Batch(); gridBoxes(kit, gb); kit.mesh(gb, {}, true);
+    }
+    // ---- volcano glow, torch light
+    halo.push([165, 206, 585, 0xff7a2a]);
+    kit.mesh(b, {}, false); kit.foliage(jt, { strength: 0.4, heightScale: 0.14 });
+    if (tk.length) {
+      kit.particles({ emitters: tk, count: 8, vel: [0, 1.8, 0], spread: [0.25, 0.5, 0.25], life: 0.8, size: 1.0, grow: -0.5, alpha: 0.95, color: [0xffa030, 0xffd060, 0xff6a20], additive: true });
+      halos(kit, tk.map((q) => [q[0], q[1], q[2], 0xff9a40]), { size: 6, alpha: 0.55 });
+    }
+    halos(kit, halo.slice(-1), { size: 170, alpha: 0.5, fog: false });
+    halos(kit, halo.slice(0, -1), { size: 20, alpha: 0.5 });
   }
 
   // rolling boulders: one instanced mesh, no per-frame allocation
