@@ -658,7 +658,7 @@
     const jit = (c, r) => mul(c, 0.85 + r() * 0.3);
     const jf = new kit.Batch(), b = new kit.Batch(), gl = [], pools = [], flames = [];
     // ---- undergrowth along the whole course: ferns, flowering bushes, mossy boulders, rock clusters
-    kit.scatter(400, 0, 7, 12.6, (x, z, i, r) => {
+    kit.scatter(300, 0, 7, 12.6, (x, z, i, r) => {
       const t = r();
       if (t < 0.5) fern(jf, x, gy + 0.3, z, 0.7 + r() * 0.9, r() * 6, jit(fg[(r() * 6) | 0], r), jit(fg[(r() * 6) | 0], r));
       else if (t < 0.78) { const s = 0.8 + r() * 0.8; for (let k = 0; k < 2; k++) jf.blob(x + (r() - 0.5) * 1.6 * s, gy + 0.7 * s, z + (r() - 0.5) * 1.6 * s, 1.2 * s, 0.85 * s, 1.2 * s, jit(fg[(r() * 6) | 0], r), 0); const fc = [col(0xff5a8a), col(0xffe14a), col(0xffffff), col(0xff8a3a), col(0xb06aff)][(r() * 5) | 0]; for (let k = 0; k < 3; k++) jf.box(x + (r() - 0.5) * 2 * s, gy + 1.3 * s + r() * 0.5, z + (r() - 0.5) * 2 * s, 0.3, 0.3, 0.3, r() * 3, fc); }
@@ -738,7 +738,7 @@
     { const ff = []; for (let d = 40; d < L; d += 34) { const f = kit.frame(d), s = ((d / 34) | 0) & 1 ? 1 : -1, p = kit.at(d, s * (f.halfWidth + 6), 0); ff.push([p[0], p[1] + 2, p[2]]); }
       kit.particles({ emitters: ff, count: 5, vel: [0, 0.3, 0], spread: [0.6, 0.3, 0.6], jitter: [5, 1.5, 5], life: 4.2, size: 0.9, alpha: 1, pow: 0.7, fadeIn: 0.4, wob: 1.2, color: [0xf4ff80, 0xb8ff90], additive: true }); }
     // ---- dense giant-fern hedges and pebbles hugging both sides of the road
-    for (let d = 4, n = 0; d < L - 4; d += 7.5, n++) {
+    for (let d = 4, n = 0; d < L - 4; d += 10, n++) {
       if (inCave(d) || inBridge(d)) continue;
       for (let s = -1; s <= 1; s += 2) {
         const f = kit.frame(d + hash(n, s + 3) * 4), l = s * (f.halfWidth + 3.9 + hash(n, s + 9) * 3.2), p = kit.at(d, l, 0), sc = 1.5 + hash(n, s + 5) * 1.3, y = p[1] - 0.9;
