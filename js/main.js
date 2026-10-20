@@ -355,7 +355,12 @@
     kart.lapStart = 0;
     kart.position = i + 1;
     kart._cssColor = kartColor(e.kart);
-    if (kart.mesh && Game.shadows) kart.mesh.traverse((o) => { if (o.isMesh && !o.material.transparent) o.castShadow = true; });
+    // only the chunky kart/rider pieces cast; face/arm/FX overlays would just add shadow-pass draw calls
+    if (kart.mesh) kart.mesh.traverse((o) => {
+      if (!o.isMesh) return;
+      const g = o.geometry, tris = g ? (g.index ? g.index.count : g.attributes.position ? g.attributes.position.count : 0) / 3 : 0;
+      o.castShadow = !!Game.shadows && !o.material.transparent && tris >= 300;
+    });
     if (e.players && e.players.length === 2) kart.coop = { driver: e.players[0], thrower: e.players[1] };
     if (kart.mesh) {
       kart.mesh.position.copy(kart.pos);
@@ -373,6 +378,9 @@
     renderer.shadowMap.enabled = Game.shadows;
     const track = (Game.track = new G.Track(trackId, scene, { mirror: !!opts.mirror }));
     applyTrackLook(track);
+    // scenery receives sun shadows but never casts them: merged course meshes span the whole map and
+    // would be redrawn into the shadow map every frame (karts are the only dynamic casters)
+    if (track.root) track.root.traverse((o) => { if (o.isMesh || o.isInstancedMesh) o.castShadow = false; });
     const grid = track.getStartGrid(entrants.length);
     entrants.forEach((e, i) => {
       const kart = makeKart(e, i, track, cc, grid);
