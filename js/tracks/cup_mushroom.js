@@ -180,7 +180,7 @@
     if (tex) { tex.anisotropy = 4; }
     return {
       tex,
-      mat() { return kit.mat(tex ? { map: tex, emissive: 0x666666, emissiveMap: tex } : {}); },
+      mat() { return kit.mat(tex ? { map: tex, emissive: 0x444444, emissiveMap: tex } : {}); },
       uv(i) { const x = (i % cols) * cw, y = Math.floor(i / cols) * ch; return [(x + 1) / W, 1 - (y + ch - 1) / TH, (x + cw - 1) / W, 1 - (y + 1) / TH]; },
     };
   }
@@ -268,8 +268,8 @@
         ctx.fillStyle = '#1c3a5c'; ctx.fillRect(0, 0, w, h);
         for (let x = 0; x < 8; x++) for (let y = 0; y < 2; y++) { ctx.fillStyle = (x + y) & 1 ? '#7fd0ff' : '#a8e4ff'; ctx.fillRect(x * w / 8 + 4, y * h / 2 + 6, w / 8 - 8, h / 2 - 12); }
       } else if (i === 9) { // tunnel tile
-        ctx.fillStyle = '#e8f0f2'; ctx.fillRect(0, 0, w, h);
-        for (let x = 0; x < 6; x++) for (let y = 0; y < 3; y++) { ctx.fillStyle = (x + y) & 1 ? '#bfe6ee' : '#f6fbfc'; ctx.fillRect(x * w / 6 + 2, y * h / 3 + 2, w / 6 - 4, h / 3 - 4); }
+        ctx.fillStyle = '#9ec6d0'; ctx.fillRect(0, 0, w, h);
+        for (let x = 0; x < 6; x++) for (let y = 0; y < 3; y++) { ctx.fillStyle = (x + y) & 1 ? '#8cc4d2' : '#bcdde6'; ctx.fillRect(x * w / 6 + 2, y * h / 3 + 2, w / 6 - 4, h / 3 - 4); }
         ctx.fillStyle = '#e83a3a'; ctx.fillRect(0, h * 0.82, w, h * 0.06);
       } else if (i === 10) { // roller door
         ctx.fillStyle = '#d8dde4'; ctx.fillRect(0, 0, w, h);
@@ -359,7 +359,7 @@
       for (let d = t0; d < t1; d += 6) rbox(b, kit, d + 3, 0, 12.9, 2 * w - 1, 2.6, 6.2, col(0x5cba3e));   // grass crown on the roof
       for (const o of [-24, -8, 8, 24]) {
         const c = kit.at((t0 + t1) / 2 + o, 0, 0);
-        blobR(b, kit, c[0], c[1] + 15, c[2], 18, 5, 21, ry, jit(kit, 0x5cba3e, rng, 0.08), 2);
+        blobR(b, kit, c[0], c[1] + 16.6, c[2], 18, 5, 21, ry, jit(kit, 0x5cba3e, rng, 0.08), 2);
       }
       for (let k = 0; k < 14; k++) { const c = kit.at(t0 + rng() * 66, (rng() < 0.5 ? -1 : 1) * rng() * 12, 0); flowerPatch(fb, kit, c[0], c[1] + 17, c[2], 6, 8, [0xffffff, 0xffd23a, 0xff6a8a], rng); }
       kit.reserve(kit.at((t0 + t1) / 2, 0, 0)[0], kit.at((t0 + t1) / 2, 0, 0)[2], 36);
@@ -396,7 +396,7 @@
       P.forEach((q, i) => { const m = balloonMesh(kit, sets[i], 6 + (i % 2) * 1.5, 11); m.position.set(q[0], q[1], q[2]); m.rotation.y = i; kit.bob(m, 1.4, 0.35 + i * 0.05, i * 1.3, 0.03); kit.spinner(m, 'y', 0.03 + i * 0.01); });
     }
     kit.mesh(b); kit.foliage(fb, { strength: 0.3 });
-    kit.mesh(sg, at.tex ? { map: at.tex, emissive: 0x777777, emissiveMap: at.tex, detail: false } : {});
+    kit.mesh(sg, at.tex ? { map: at.tex, emissive: 0x484848, emissiveMap: at.tex, detail: false } : {});
     gl.done();
   }
 
@@ -473,7 +473,7 @@
       }
     }
     // ---- cliffs: layered limestone headlands at both ends of the beach + sea stacks + a rock arch
-    const cl = [0xe8d6b0, 0xd9c08c, 0xc9a870, 0xeadcb8];
+    const cl = [0xe8d6b0, 0xd9c08c, 0xc9a870, 0xeadcb8].map(col);
     const headland = (x, z, R, H, seed) => {
       for (let k = 0; k < 4; k++) b.frustum(x, gy + (k * H) / 4 - 1, z, R * (1 - k * 0.1), R * (1 - (k + 1) * 0.1 - 0.04), H / 4 + 0.4, 8, cl[k % 4], seed + k * 0.6);
       b.blob(x, gy + H - 1, z, R * 0.82, H * 0.14, R * 0.82, col(0x4cae4a), 1);
@@ -513,7 +513,7 @@
     // ---- big beach ball + inflatable ring props near the start
     { const p = kit.at(30, shoreL - 6, 0); b.blob(p[0], gy + 1.3, p[2], 1.3, 1.3, 1.3, col(0xff4d4d), 1); b.blob(p[0], gy + 1.3, p[2], 1.32, 0.5, 1.32, col(0xffffff), 1); }
     kit.mesh(b); kit.foliage(fb, { strength: 0.4, heightScale: 0.2 });
-    kit.mesh(sg, at.tex ? { map: at.tex, emissive: 0x777777, emissiveMap: at.tex, detail: false } : {});
+    kit.mesh(sg, at.tex ? { map: at.tex, emissive: 0x484848, emissiveMap: at.tex, detail: false } : {});
     gl.done();
   }
 
@@ -553,7 +553,7 @@
     const pal = [0xff4d6d, 0xffd23a, 0x3aa0ff, 0x4ad64a, 0xff7ad8, 0xff9a2a, 0xb86aff];
     // ---- promenade: pastel checker paving on both sides of the oval + candy-cane picket fence
     {
-      const pv = new kit.Batch(), pc = [col(0xffe0ec), col(0xdff3ff), col(0xfff4c4), col(0xe2ffd8)];
+      const pv = new kit.Batch(), pc = [col(0xffb8d4), col(0xa8dcff), col(0xffe48a), col(0xb4f0a0)];
       for (let d = 0; d < L; d += 4.6) for (const [l0, l1] of [[-(hw + 0.6), -(hw + 5.6)], [hw + 0.6, hw + 5.6]]) {
         roadQuad(pv, kit, d, d + 4.6, l0, l1, 0.03, pc[((d / 4.6) | 0) & 3]);
         roadQuad(pv, kit, d, d + 4.6, l0 < 0 ? l1 - 5 : l1, l0 < 0 ? l1 : l1 + 5, 0.02, pc[(((d / 4.6) | 0) + 2) & 3]);
@@ -586,14 +586,14 @@
     // teacups, pirate ship, drop tower, big-top bumper tent & fun-house on the outer ring
     const ringPos = (frac, lat) => kit.at(L * frac, lat, 0);
     {
-      const p = ringPos(0.12, -(hw + 78)); const cb = new kit.Batch();
+      const p = ringPos(0.12, -(hw + 56)); const cb = new kit.Batch();
       cb.frustum(0, 0, 0, 7, 7.4, 0.5, 16, col(0xffffff), 0);
       for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU, px = Math.cos(a) * 4.2, pz = Math.sin(a) * 4.2; cb.frustum(px, 0.5, pz, 1.5, 1.1, 1.3, 10, col(pal[k % 7]), 0); cb.frustum(px, 1.8, pz, 1.52, 1.52, 0.16, 10, col(0xffffff), 0); cb.blob(px, 0.7, pz, 0.7, 0.2, 0.7, col(0xffe9a8), 0); }
       cb.frustum(0, 0.5, 0, 0.9, 0.5, 2.6, 8, col(0xff4d6d), 0); cb.blob(0, 3.1, 0, 1.1, 0.8, 1.1, col(0xffd23a), 1);
       kit.spinBatch(cb, { x: p[0], y: gy + 0.4, z: p[2], axis: 'y', speed: 0.6 }); kit.reserve(p[0], p[2], 10);
     }
     {
-      const p = ringPos(0.3, -(hw + 80)), f = kit.frame(L * 0.3), ry = Math.atan2(f.tx, f.tz), pb = new kit.Batch();
+      const p = ringPos(0.3, -(hw + 58)), f = kit.frame(L * 0.3), ry = Math.atan2(f.tx, f.tz), pb = new kit.Batch();
       for (const s of [-1, 1]) { beam(b, [p[0] + f.rx * s * 5, gy, p[2] + f.rz * s * 5 - 4], [p[0], gy + 15, p[2]], 0.35, col(0x4a6fd8)); beam(b, [p[0] + f.rx * s * 5, gy, p[2] + f.rz * s * 5 + 4], [p[0], gy + 15, p[2]], 0.35, col(0x4a6fd8)); }
       pb.blob(0, -9, 0, 1.8, 1.6, 7.6, col(0xff4d6d), 1); pb.box(-0.1, -7, -0.3, 0.2, 9, 0.2, 0, col(0xdddddd)); pb.blob(0, -7.2, 7.3, 0.7, 1.2, 1.0, col(0xffd23a), 1);
       pb.tri([0, 1, -0.3], [0, -6, 3.5], [0, -6, -3.8], col(0xffffff));
@@ -601,7 +601,7 @@
       b.box(p[0] - 5, gy, p[2] - 5, 10, 0.4, 10, 0, col(0xe8e2d2));
     }
     {
-      const p = ringPos(0.52, -(hw + 70)), tb = new kit.Batch();
+      const p = ringPos(0.52, -(hw + 56)), tb = new kit.Batch();
       for (let k = 0; k < 4; k++) b.box(p[0] - 1.1, gy + k * 9, p[2] - 1.1, 2.2, 9.05, 2.2, 0, col(k & 1 ? 0x3aa0ff : 0xffffff));
       b.blob(p[0], gy + 37, p[2], 2.2, 1.6, 2.2, col(0xff4d6d), 1);
       for (let k = 0; k < 10; k++) { const y = gy + 5 + k * 3.3; bulbs.blob(p[0] + 1.18, y, p[2], 0.2, 0.2, 0.2, col(pal[k % 7]), 0); bulbs2.blob(p[0] - 1.18, y, p[2], 0.2, 0.2, 0.2, col(pal[(k + 3) % 7]), 0); gl.halo(p[0] + 1.4, y, p[2], 0.9, pal[k % 7], 0.5); }
@@ -609,13 +609,13 @@
       for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) tb.box(sx * 2 - 0.3, 1.8, sz * 2 - 0.3, 0.6, 0.9, 0.6, 0, col(0x3aa0ff));
       const m = kit.mesh(tb); m.position.set(p[0], gy + 4, p[2]); kit.slide(m, 0, 11, 0, 0.7); kit.reserve(p[0], p[2], 9);
     }
-    bigTop(b, kit, ...ringPos(0.7, -(hw + 74)), 11, 12, col(0xff4d6d), col(0xffffff)); { const p = ringPos(0.7, -(hw + 74)); kit.reserve(p[0], p[2], 13); const f = kit.frame(L * 0.7); panelQ(sg, at, 1, p[0] + f.rx * 0, gy + 5.5, p[2], 9, 2.4, faceRoad(f, -1) + Math.PI, col(0x2b2f3a), kit); }
-    bigTop(b, kit, ...ringPos(0.9, -(hw + 70)), 9, 10, col(0x3aa0ff), col(0xffd23a)); { const p = ringPos(0.9, -(hw + 70)); kit.reserve(p[0], p[2], 11); }
+    bigTop(b, kit, ...ringPos(0.7, -(hw + 58)), 11, 12, col(0xff4d6d), col(0xffffff)); { const p = ringPos(0.7, -(hw + 58)); kit.reserve(p[0], p[2], 13); const f = kit.frame(L * 0.7); panelQ(sg, at, 1, p[0] + f.rx * 0, gy + 5.5, p[2], 9, 2.4, faceRoad(f, -1) + Math.PI, col(0x2b2f3a), kit); }
+    bigTop(b, kit, ...ringPos(0.9, -(hw + 56)), 9, 10, col(0x3aa0ff), col(0xffd23a)); { const p = ringPos(0.9, -(hw + 56)); kit.reserve(p[0], p[2], 11); }
     {   // fun house: clown face facade
       const p = ringPos(0.42, hw + 22), f = kit.frame(L * 0.42), ry = faceRoad(f, 1); void p; void ry;
     }
     {
-      const p = ringPos(0.0, -(hw + 90)), ry = 0.0;
+      const p = ringPos(0.0, -(hw + 66)), ry = 0.0;
       b.box(p[0] - 10, gy, p[2], 20, 14, 5, ry, col(0xffe9a8));
       b.blob(p[0], gy + 8, p[2] + 2.8, 6, 5.2, 1.2, col(0xfff3d6), 1);
       b.blob(p[0] - 2.2, gy + 9.4, p[2] + 3.6, 1.2, 1.4, 0.6, col(0xffffff), 1); b.blob(p[0] + 2.2, gy + 9.4, p[2] + 3.6, 1.2, 1.4, 0.6, col(0xffffff), 1);
@@ -624,6 +624,19 @@
       b.blob(p[0], gy + 12.5, p[2] + 2.6, 5.2, 2.6, 2.2, col(0xff4d6d), 1); b.blob(p[0] - 5.2, gy + 11, p[2] + 2.6, 2.0, 2.0, 1.6, col(0xffd23a), 1); b.blob(p[0] + 5.2, gy + 11, p[2] + 2.6, 2.0, 2.0, 1.6, col(0x3aa0ff), 1);
       panelQ(sg, at, 4, p[0], gy + 0.5, p[2] + 2.6, 8, 2.0, 0, col(0x2b2f3a), kit);
       kit.reserve(p[0], p[2], 16);
+    }
+    // ---- food / game stalls in the band between the promenade and the coaster
+    for (let k = 0; k < 26; k++) {
+      const d = (k + 0.5) * (L / 26), s = k % 3 === 0 ? 1 : -1, p = kit.at(d, s * (hw + 17 + (k & 1) * 3), 0), f = kit.frame(d), ry = faceRoad(f, s), c = pal[k % 7];
+      if (!kit.clear(p[0], p[2], 12)) continue;
+      const cs = Math.cos(ry), sn = Math.sin(ry);
+      b.box(p[0], gy, p[2], 4.2, 2.3, 2.6, ry, col(0xfff3d6));
+      for (const sx of [-1, 1]) b.box(p[0] + sx * 1.9 * cs + 1.9 * sn, gy, p[2] - sx * 1.9 * sn + 1.9 * cs, 0.14, 2.7, 0.14, 0, col(0xffffff));
+      b.box(p[0] + 1.9 * sn, gy + 2.5, p[2] + 1.9 * cs, 4.6, 0.14, 2.4, ry, c); b.box(p[0] + 1.9 * sn, gy + 2.62, p[2] + 1.9 * cs, 4.6, 0.12, 1.2, ry, col(0xffffff));
+      b.box(p[0] + 1.3 * sn, gy + 1.0, p[2] + 1.3 * cs, 3.6, 0.2, 0.7, ry, kit.mul(c, 0.85));
+      panelQ(sg, at, 2 + (k % 6), p[0] + 0.5 * sn, gy + 2.9, p[2] + 0.5 * cs, 3.6, 1.0, ry, col(0x2b2f3a), kit);
+      for (let q = 0; q < 3; q++) fb.blob(p[0] + (q - 1) * 1.6 + 2.4 * sn, gy + 4.6 + q * 0.4, p[2] + 2.4 * cs, 0.55, 0.7, 0.55, col(pal[(k + q) % 7]), 1);
+      kit.reserve(p[0], p[2], 3);
     }
     // ---- toy block stacks with letters + giant crayons + beach balls
     for (let k = 0; k < 14; k++) {
@@ -664,7 +677,7 @@
     kit.scatter(60, 2, 70, 16, (x, z, i, r) => { bush(fb, kit, x, gy, z, 0.9 + r() * 0.8, r, 0x2f9a3e, 0x57c24a); flowerPatch(fb, kit, x + 1, gy, z, 2, 12, [0xff4d6d, 0xffd23a, 0xffffff, 0xff7ad8], r); });
     kit.farScatter(14, 120, (x, z, r) => { const s = 26 + r() * 24; blobR(b, kit, x, gy - 4, z, s * 1.4, s * 0.55, s, r() * 3, kit.mix(col(0x7ad04a), col(0xb6e65a), r()), 2); });
     kit.mesh(b); kit.foliage(fb, { strength: 0.3 });
-    kit.mesh(sg, at.tex ? { map: at.tex, emissive: 0x777777, emissiveMap: at.tex, detail: false } : {});
+    kit.mesh(sg, at.tex ? { map: at.tex, emissive: 0x484848, emissiveMap: at.tex, detail: false } : {});
     gl.done();
     // ferris wheel rim lights (turn with the wheel)
     {
@@ -838,7 +851,7 @@
     // ---- drifting dust over the road for heat haze
     kit.particles({ x: bb.cx, y: 2.5, z: bb.cz, count: 90, vel: [3.5, 0.1, 0.8], spread: [260, 2.2, 160], life: 6, size: 5, grow: 0.8, alpha: 0.1, color: [0xf5dba0, 0xeac88a], wob: 0.4 });
     kit.mesh(b); kit.foliage(fb, { strength: 0.2 });
-    kit.mesh(sg, at.tex ? { map: at.tex, emissive: 0x666666, emissiveMap: at.tex, detail: false } : {});
+    kit.mesh(sg, at.tex ? { map: at.tex, emissive: 0x404040, emissiveMap: at.tex, detail: false } : {});
     gl.done();
   }
 
@@ -847,8 +860,8 @@
     id: 'sunshine_circuit', name: 'Sunshine Circuit', cup: 'mushroom', order: 1, laps: 3, music: 'circuit',
     seed: 101, hw: 12, shoulder: 5, scale: 1, style: 'meadow',
     theme: {
-      sky: [0x2f86e6, 0xbfe6ff, 0x9ad46c], fog: [0xcfe9ff, 170, 650], ground: 0x6cc24a, shoulder: 0x58b03c,
-      road: [0x5a5e6c, 0x535766], curb: [0xe83a3a, 0xffffff], hemi: [0xd6ecff, 0x6fa850, 0.95], sun: [0xfff4dc, 0.9],
+      sky: [0x1f78e8, 0xa6dcff, 0x9ad46c], fog: [0xc8e6ff, 170, 650], ground: 0x6cc24a, shoulder: 0x58b03c,
+      road: [0x5a5e6c, 0x535766], curb: [0xe83a3a, 0xffffff], hemi: [0xd6ecff, 0x7fb050, 1.0], sun: [0xfff1d0, 1.0],
       emb: 0x58b03c, bg: 0xcfe9ff,
     },
     walls: 'barrier', wallColors: [0xffffff, 0xe83a3a],
@@ -1022,8 +1035,8 @@
     id: 'coral_coast', name: 'Coral Coast', cup: 'mushroom', order: 2, laps: 3, music: 'beach',
     seed: 202, hw: 12, shoulder: 5, scale: 1, style: 'meadow', offroad: 'sand',
     theme: {
-      sky: [0x2a8fe8, 0xa9e3ff, 0xfff0c8], fog: [0xc6ecff, 200, 760], ground: 0xdcb872, shoulder: 0xd2ac66,
-      road: [0x6f6c6a, 0x676462], curb: [0xff7a59, 0xfff3d6], hemi: [0xdff1ff, 0xb59d6a, 0.72], sun: [0xfff0d0, 0.7],
+      sky: [0x1a84f0, 0x8cdcff, 0xfff0c8], fog: [0xbde9ff, 200, 780], ground: 0xdcb872, shoulder: 0xd2ac66,
+      road: [0x6f6c6a, 0x676462], curb: [0xff7a59, 0xfff3d6], hemi: [0xdff1ff, 0xb59d6a, 0.8], sun: [0xfff0d0, 0.82],
       emb: 0xd8b36c, bg: 0xc6ecff,
     },
     walls: 'fence', wallColors: [0xfff3d6, 0x3fb8c9],
@@ -1252,7 +1265,7 @@
     id: 'tiny_tot_park', name: 'Tiny Tot Park', cup: 'mushroom', order: 3, laps: 7, music: 'park',
     seed: 303, hw: 10, shoulder: 3, scale: 1, style: 'meadow',
     theme: {
-      sky: [0x4aa0f0, 0xcfeaff, 0xffe9b8], fog: [0xd8eeff, 160, 520], ground: 0x78c85a, shoulder: 0x62b048,
+      sky: [0x3a98f5, 0xc4e6ff, 0xffd8ec], fog: [0xe2ecff, 170, 560], ground: 0x78c85a, shoulder: 0x62b048,
       road: [0x70747f, 0x686c78], curb: [0xff4d6d, 0xffffff], hemi: [0xe6f2ff, 0x84b864, 1.0], sun: [0xfff4d8, 0.9],
       emb: 0x62b048, bg: 0xd8eeff,
     },
@@ -1436,7 +1449,7 @@
     id: 'dusty_desert', name: 'Dustbowl Desert', cup: 'mushroom', order: 4, laps: 3, music: 'desert',
     seed: 404, hw: 14, shoulder: 5, scale: 1, style: 'dunes', offroad: 'sand', walls: 'adobe',
     theme: {
-      sky: [0x4c9be0, 0xf6d9a2, 0xeac47a], fog: [0xf1cf94, 130, 520], ground: 0xd9a95a, shoulder: 0xcc9a4c,
+      sky: [0x2f86e0, 0xf9dca0, 0xf2c070], fog: [0xf4d098, 140, 560], ground: 0xd9a95a, shoulder: 0xcc9a4c,
       road: [0x7c7064, 0x73675a], curb: [0xc8502d, 0xf3e2b8], hemi: [0xffe6c4, 0xb88a4c, 0.72], sun: [0xffe2b0, 0.75],
       emb: 0xd0a050, bg: 0xf1cf94,
     },

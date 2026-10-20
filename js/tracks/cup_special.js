@@ -1119,7 +1119,7 @@
     const inHall = (d) => d > LF.hall[0] - 8 && d < LF.hall[1] + 8;
     // ---- crust islands floating on the lava, glowing rims
     const rim = new kit.Batch();
-    kit.scatter(170, 1.5, 70, 13, (x, z, i, r) => {
+    kit.scatter(240, 1.5, 70, 13, (x, z, i, r) => {
       const rr = 2.5 + r() * 8, n = 9, a0 = r() * 6, y = gy + 0.11;
       for (let k = 0; k < n; k++) { const a = a0 + (k / n) * TAU, a2 = a0 + ((k + 1) / n) * TAU, ra = rr * (0.8 + 0.3 * hash(i + k, 3)), rb = rr * (0.8 + 0.3 * hash(i + k + 1, 3));
         b.tri([x, y, z], [x + Math.cos(a) * ra, y, z + Math.sin(a) * ra], [x + Math.cos(a2) * rb, y, z + Math.sin(a2) * rb], mul(crust, 0.8 + r() * 0.5));
@@ -1158,7 +1158,7 @@
       kit.mesh(cb);
       const bx = cx - f.rx * s * 25.8, bz = cz - f.rz * s * 25.8, ux = cx - f.rx * s * 11.1, uz = cz - f.rz * s * 11.1, fx = bx - f.rx * s * 2, fz = bz - f.rz * s * 2, w2 = 4.2, tx = f.tx * w2, tz = f.tz * w2;
       kit.panel([[bx - tx, gy - 1.8, bz - tz], [bx + tx, gy - 1.8, bz + tz], [ux + tx * 0.8, gy + 41.5, uz + tz * 0.8], [ux - tx * 0.8, gy + 41.5, uz - tz * 0.8]], fall, [1, 1]);
-      pools.push([fx, gy + 0.2, fz, 14, 0xff6a1a, 0.9]); gl.push([fx, gy + 3, fz, 0xff7a20, 1]);
+      pools.push([fx, gy + 0.2, fz, 11, 0xff5a14, 0.45]); gl.push([fx, gy + 3, fz, 0xff7a20, 1]);
       kit.particles({ x: fx - f.rx * s * 2, y: gy + 2, z: fz - f.rz * s * 2, count: 18, vel: [0, 3, 0], spread: [2, 1.2, 2], jitter: [3, 0.5, 3], life: 3, size: 6, grow: 2, alpha: 0.35, pow: 1, color: [0xffb060, 0x6a3a30] });
     }
     // ---- keep: glowing windows and ember crest
