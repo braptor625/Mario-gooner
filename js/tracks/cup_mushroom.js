@@ -235,8 +235,9 @@
   function flowerPatch(b, kit, x, y, z, rad, n, cols, r) {
     for (let i = 0; i < n; i++) {
       const a = r() * TAU, d = Math.sqrt(r()) * rad, px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d, hh = 0.35 + r() * 0.35;
-      b.box(px, y, pz, 0.05, hh, 0.05, 0, kit.col(0x3a9a3a));
-      b.blob(px, y + hh + 0.06, pz, 0.17, 0.12, 0.17, kit.col(cols[(r() * cols.length) | 0]), 0);
+      const yh = y + hh, c = kit.col(cols[(r() * cols.length) | 0]);
+      b.tri([px - 0.03, y, pz], [px + 0.03, y, pz], [px, yh, pz], kit.col(0x3a9a3a));
+      b.quad([px - 0.2, yh, pz], [px, yh + 0.05, pz + 0.2], [px + 0.2, yh, pz], [px, yh + 0.05, pz - 0.2], c);
     }
   }
   // striped hot-air balloon (envelope + basket), origin at the balloon's mouth; returns the mesh
@@ -389,6 +390,41 @@
     });
     kit.scatter(60, 2, 60, 24, (x, z, i, r) => rockCluster(b, kit, x, gy, z, 0.8 + r() * 1.2, r, [0xb9b3a6, 0xa8a296, 0xcfc9bc]));
     kit.scatter(70, 1, 40, 22, (x, z, i, r) => bush(b, kit, x, gy, z, 0.8 + r() * 0.9, r, 0x2f9a3e, 0x57c24a));
+    // ---- infield: tulip fields, lake with island, windmill, barn & silo
+    {
+      const tf = new kit.Batch(), tc = [[0xff4d6d, 0xffd23a], [0xff9ad8, 0xffffff], [0xb86aff, 0xffd23a], [0xff7a1a, 0xff4d6d], [0xffffff, 0xff9ad8]];
+      [[120, 112], [262, 62], [300, 138], [40, 118], [200, 48], [-50, 120]].forEach(([x, z], i) => {
+        if (!kit.clear(x, z, 26)) return;
+        const w = 34, dpt = 22;
+        for (let r = 0; r < 10; r++) tf.quad([x - w / 2, gy + 0.05, z - dpt / 2 + r * dpt / 10], [x + w / 2, gy + 0.05, z - dpt / 2 + r * dpt / 10], [x + w / 2, gy + 0.05, z - dpt / 2 + (r + 0.7) * dpt / 10], [x - w / 2, gy + 0.05, z - dpt / 2 + (r + 0.7) * dpt / 10], col(tc[i % 5][r & 1]));
+        for (let r = 0; r < 10; r += 1) for (let q = 0; q < 9; q++) fb.blob(x - w / 2 + 2 + q * 3.7 + (r & 1), gy + 0.45, z - dpt / 2 + (r + 0.35) * dpt / 10, 0.4, 0.55, 0.4, col(tc[i % 5][r & 1]), 0);
+        kit.reserve(x, z, 20);
+      });
+      const lk = [196, 100];
+      if (kit.clear(lk[0], lk[1], 34)) {
+        const m = discMesh(kit, lk[0], gy + 0.12, lk[1], 24, { color: 0x3fb8e8, opacity: 0.9, specular: 0xffffff, water: 0.9 }, 30);
+        b.frustum(lk[0], gy, lk[1], 27, 26, 0.3, 24, col(0xe8d6a0), 0);
+        b.blob(lk[0] + 5, gy + 0.1, lk[1] - 3, 6, 1.4, 5, col(0x6cc24a), 1); palm(fb, kit, lk[0] + 6, gy + 0.8, lk[1] - 3, 0.9, rng); bush(b, kit, lk[0] + 3, gy + 0.9, lk[1] - 4, 1.0, rng, 0x2f9a3e, 0x57c24a);
+        for (let q = 0; q < 14; q++) { const a = (q / 14) * TAU, rr = 24 + (q % 3); rockCluster(b, kit, lk[0] + Math.cos(a) * rr, gy, lk[1] + Math.sin(a) * rr, 0.8 + (q % 2) * 0.5, rng, [0xb9b3a6, 0xcfc9bc]); }
+        for (let q = 0; q < 3; q++) b.frustum(lk[0] - 8 + q * 7, gy + 0.12, lk[1] + 8, 1.5, 1.5, 0.12, 8, col(0x59d66b), 0);
+        void m; kit.reserve(lk[0], lk[1], 30);
+      }
+      const wm = [330, 112];
+      if (kit.clear(wm[0], wm[1], 24)) {
+        b.frustum(wm[0], gy, wm[1], 4.2, 2.6, 13, 8, col(0xf4efe2), 0); b.frustum(wm[0], gy + 13, wm[1], 3.4, 0, 4.4, 8, col(0xe83a3a), 0); b.box(wm[0] - 0.9, gy, wm[1] + 3.0, 1.8, 3, 0.3, 0, col(0x6a4a2a));
+        const bl = new kit.Batch();
+        for (let q = 0; q < 4; q++) { const a = (q / 4) * Math.PI * 2; bl.box(Math.cos(a) * 3.6 - 0.35, Math.sin(a) * 3.6 - 0.35, 0, 0.7, 0.7, 0.2, 0, col(0x6a4a2a)); for (let k = 1; k < 7; k++) bl.box(Math.cos(a) * k * 1.4 - 0.5, Math.sin(a) * k * 1.4 - 0.5, 0.1, 1.0, 1.0, 0.12, 0, col(k & 1 ? 0xffffff : 0xf4efe2)); }
+        kit.spinBatch(bl, { x: wm[0], y: gy + 12.5, z: wm[1] + 4.6, axis: 'z', speed: 0.5 });
+        kit.reserve(wm[0], wm[1], 14);
+      }
+      const bn = [-48, 100];
+      if (kit.clear(bn[0], bn[1], 26)) {
+        b.box(bn[0], gy, bn[1], 14, 6, 9, 0.3, col(0xd8503a)); b.frustum(bn[0], gy + 6, bn[1], 9.2, 0, 4.4, 4, col(0xcfc7b4), 0.3 + Math.PI / 4);
+        b.box(bn[0] + 1, gy, bn[1] + 4.6, 5, 4.6, 0.3, 0.3, col(0xffffff)); b.frustum(bn[0] + 11, gy, bn[1] - 2, 2.4, 2.4, 11, 10, col(0xdad6c8), 0); b.blob(bn[0] + 11, gy + 11, bn[1] - 2, 2.4, 1.4, 2.4, col(0x8a8f99), 1);
+        for (let q = 0; q < 8; q++) b.box(bn[0] - 12 + q * 3, gy, bn[1] + 14, 0.2, 1.4, 0.2, 0, col(0xffffff));
+        kit.reserve(bn[0], bn[1], 18);
+      }
+    }
     // ---- hot-air balloons
     {
       const sets = [[0xe83a3a, 0xffffff], [0xffd23a, 0x2c6bff], [0xff7a1a, 0xffffff, 0x3ac66a], [0x8a4cff, 0xffd23a], [0x18b8e8, 0xff5a8a]];
@@ -722,7 +758,7 @@
   function desertBeauty(track, kit, bb, st) {
     const L = kit.length, col = kit.col, rng = kit.rng, gy = kit.groundY, hwS = 14 + 5;
     const b = new kit.Batch(), fb = new kit.Batch(), sg = new kit.Batch(true), gl = glowSet(kit);
-    const sandL = col(0xf0cc7c), sandD = col(0xc9964a), stoneA = col(0xd2a05c), stoneB = col(0xc08a48), stoneC = col(0xe0b878);
+    const sandL = col(0xe6bd72), sandD = col(0xc9964a), stoneA = col(0xd2a05c), stoneB = col(0xc08a48), stoneC = col(0xe0b878);
     const SG = [['BAZAAR', '#c8502d', '#8a3418'], ['OASIS INN', '#2a8fc9', '#1a5a8a'], ['POTTERY', '#e8961a', '#a85a0c'], ['SPICES', '#c82c64', '#8a1840'], ['DUSTBOWL', '#8a5a2a', '#5a3818'], ['WELL', '#35a06a', '#1a6a40']];
     const at = makeAtlas(kit, 1024, 640, 12, 4, (ctx, w, h, i) => {
       if (i < 6) { sponsorCell(ctx, w, h, SG[i][0], SG[i][1], SG[i][2], '#fff3d0'); return; }
@@ -794,11 +830,11 @@
     }
     // ---- oasis village (mud-brick houses, domes, market stalls, camels, wells, torches)
     {
-      const vx = 70, vz = 205, mudC = [col(0xe0b878), col(0xd2a368), col(0xe8c890), col(0xcf9a5e)], awn = [0xc8502d, 0x2a8fc9, 0xffd23a, 0x35a06a, 0xc82c64];
+      const vx = 62, vz = 246, mudC = [col(0xe0b878), col(0xd2a368), col(0xe8c890), col(0xcf9a5e)], awn = [0xc8502d, 0x2a8fc9, 0xffd23a, 0x35a06a, 0xc82c64];
       let placed = 0;
       for (let tries = 0; tries < 90 && placed < 14; tries++) {
-        const x = vx - 40 + rng() * 80, z = vz - 20 + rng() * 55;
-        if (!kit.clear(x, z, 34) || Math.hypot(x - 70, z - 150) < 36) continue;
+        const x = vx - 40 + rng() * 80, z = vz - 22 + rng() * 44;
+        if (!kit.clear(x, z, 22) || Math.hypot(x - 70, z - 150) < 36) continue;
         const sx = 6 + rng() * 4, sz = 6 + rng() * 4, h = 3.8 + rng() * 2.4, ry = rng() * 1.2 - 0.6, c = mudC[placed % 4], cs = Math.cos(ry), sn = Math.sin(ry);
         b.box(x, gy, z, sx, h, sz, ry, c); b.box(x, gy + h, z, sx + 0.7, 0.45, sz + 0.7, ry, stoneC);
         b.box(x + 0.5 * sn * sz, gy, z + 0.5 * cs * sz + 0.0, 1.3, 2.3, 0.2, ry, col(0x3a2418));   // doorway
@@ -810,8 +846,8 @@
         kit.reserve(x, z, 8); placed++;
       }
       for (let k = 0; k < 6; k++) {   // market stalls with striped canopies
-        const x = vx - 22 + k * 8 + rng() * 3, z = vz + 28 + rng() * 6;
-        if (!kit.clear(x, z, 30)) continue;
+        const x = vx - 22 + k * 8 + rng() * 3, z = vz - 26 - rng() * 6;
+        if (!kit.clear(x, z, 22)) continue;
         const c = awn[k % 5], ry = rng() * 0.6 - 0.3;
         for (const [px, pz] of [[-1.6, -1.2], [1.6, -1.2], [-1.6, 1.2], [1.6, 1.2]]) b.box(x + px, gy, z + pz, 0.14, 2.4, 0.14, 0, col(0x6a4a2a));
         b.box(x, gy + 2.4, z, 4.0, 0.14, 3.2, ry, c); b.box(x, gy + 2.55, z - 0.4, 4.0, 0.14, 2.4, ry, col(0xffffff)); b.box(x, gy, z, 3.0, 0.9, 1.0, ry, col(0xb5763a));
@@ -842,10 +878,11 @@
     // ---- dunes: sunlit/shaded ellipsoid pairs in several depth rings, tinted with distance
     kit.farScatter(46, 38, (x, z, r) => {
       const s = 16 + r() * 36, ry = r() * 3;
+      if (!kit.clear(x, z, s * 1.8)) return;
       blobR(b, kit, x, gy - 3, z, s * 1.7, s * 0.34, s, ry, sandD, 2);
       blobR(b, kit, x + Math.sin(ry) * s * 0.18, gy - 2.8, z + Math.cos(ry) * s * 0.18, s * 1.6, s * 0.34, s * 0.85, ry, sandL, 2);
     });
-    kit.farScatter(16, 190, (x, z, r) => { const s = 60 + r() * 70; blobR(b, kit, x, gy - 6, z, s * 1.9, s * 0.4, s, r() * 3, kit.mix(col(0xe0b070), col(0xd29a64), r()), 2); });
+    kit.farScatter(16, 190, (x, z, r) => { const s = 60 + r() * 70; if (!kit.clear(x, z, s * 1.9)) return; blobR(b, kit, x, gy - 6, z, s * 1.9, s * 0.4, s, r() * 3, kit.mix(col(0xe0b070), col(0xd29a64), r()), 2); });
     kit.farScatter(10, 240, (x, z, r) => mesa(x, z, 20 + r() * 20, 30 + r() * 40, r() * 6));
     kit.scatter(70, 3, 60, 22, (x, z, i, r) => { const s = 0.9 + r() * 1.0; b.frustum(x, gy, z, 0.5 * s, 0.4 * s, 3.2 * s, 6, kit.mul(col(0x3f9a4a), 0.9 + r() * 0.2), 0); b.blob(x, gy + 3.2 * s, z, 0.45 * s, 0.35 * s, 0.45 * s, col(0xff7ab0), 0); });
     // ---- drifting dust over the road for heat haze
@@ -1050,7 +1087,7 @@
     decorate(track, kit) {
       const L = kit.length, b = new kit.Batch(), col = kit.col, rng = kit.rng, gy = kit.groundY, bb = bounds(kit);
       const st = (track._cc = { birds: [] });
-      const seaZ = bb.minZ - 46;
+      const seaZ = bb.minZ - 36;
 
       // ---- sea (north of the coast road): shallow + deep bands, foam line
       {

@@ -370,7 +370,7 @@
       archOpening(b, cx, 32.4, cz, 8.0, 14.2, ry, mul(marble2, 0.92), 0.05);
       b.box(cx, 46.6, cz, 1.6, 1.4, 1.2, ry, gold);                                  // keystone
       const pa = (s / SEG) * TAU, px = Math.cos(pa) * (ORW - 4.6), pz = Math.sin(pa) * (ORW - 4.6);
-      column(b, px, 30, pz, 27, 1.15, marble, gold, 6);
+      b.box(px, 30, pz, 2.6, 0.6, 2.6, 0, gold); b.frustum(px, 30.6, pz, 1.1, 0.95, 25.2, 6, marble, 0.3); b.box(px, 55.8, pz, 2.8, 0.8, 2.8, 0, gold);
       b.box(Math.cos(a) * (ORW - 4.5), 54.4, Math.sin(a) * (ORW - 4.5), 1.4, 3.6, (TAU * ORW) / SEG + 0.3, -a + Math.PI / 2, s & 1 ? terra : crimson); // frieze
       if (s % 3 === 1) { const q = ban; q.board(cx * 0.995, 34.5, cz * 0.995, 5.2, 10.4, ry, ((s / 3) | 0) % 4, [1, 1, 1], 0); }
       if (s % 3 === 0) statue(b, Math.cos(a) * 244, 58, Math.sin(a) * 244, inAng(a), 1.3, marble, gold);
@@ -400,7 +400,7 @@
         sb.quad([x - f.rx * hw, f.y + 1.62, z - f.rz * hw], [x + f.rx * hw, f.y + 1.62, z + f.rz * hw], [x2 + f2.rx * hw, f2.y + 1.62, z2 + f2.rz * hw], [x2 - f2.rx * hw, f2.y + 1.62, z2 - f2.rz * hw], cc);
         sb.quad([x - f.rx * hw, f.y + 1.62, z - f.rz * hw], [x2 - f2.rx * hw, f2.y + 1.62, z2 - f2.rz * hw], [x2 - f2.rx * hw, f2.y + 1.4, z2 - f2.rz * hw], [x - f.rx * hw, f.y + 1.4, z - f.rz * hw], mul(cc, 0.85));
         sb.quad([x + f.rx * hw, f.y + 1.62, z + f.rz * hw], [x2 + f2.rx * hw, f2.y + 1.62, z2 + f2.rz * hw], [x2 + f2.rx * hw, f2.y + 1.4, z2 + f2.rz * hw], [x + f.rx * hw, f.y + 1.4, z + f.rz * hw], mul(cc, 0.85));
-        if (n % 2 === 0) sb.box(x, f.y + 0.9, z, 0.4, 0.52, 0.4, hd, marble);
+        if (n % 4 === 0) sb.box(x, f.y + 0.9, z, 0.4, 0.52, 0.4, hd, marble);
         if (n % 6 === 0) {
           sb.box(x, f.y + 0.9, z, 0.6, 0.9, 0.6, hd, marble2); sb.blob(x, f.y + 2.15, z, 0.34, 0.34, 0.34, gold, 0);
           gl.push([x, f.y + 2.2, z, 0xffc060, 0.8]);
