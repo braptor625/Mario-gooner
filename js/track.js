@@ -1198,26 +1198,6 @@
         this._mats.push(hm);
         const hz2 = new THREE.Mesh(hg, hm); hz2.renderOrder = -995; this._follow(hz2); this._add(hz2);
       }
-      if (ctex && (mode === 'day' || mode === 'sunset' || mode === 'night')) {
-        // low, wide stratus bank hugging the horizon, drifting slower than the main layer
-        const SP = [], SU = [], SC = [], SI = [], R2 = 268, n = mode === 'night' ? 7 : 11;
-        const tone = mode === 'sunset' ? [1, 0.72, 0.62] : mode === 'night' ? [0.22, 0.26, 0.42] : [0.93, 0.96, 1];
-        for (let k = 0; k < n; k++) {
-          const az = (k / n) * Math.PI * 2 + vr() * 0.4, el = (2 + vr() * 5) * Math.PI / 180, w2 = 70 + vr() * 60, h2 = w2 * 0.22;
-          const ce = Math.cos(el), cx = Math.cos(az) * ce * R2, cy = Math.sin(el) * R2, cz = Math.sin(az) * ce * R2, rx = -Math.sin(az), rz = Math.cos(az);
-          const cell = (vr() * 4) | 0, u0 = (cell & 1) * 0.5, v0 = 0.5 * (1 - (cell >> 1)), vi = SP.length / 3;
-          SP.push(cx - rx * w2, cy - h2, cz - rz * w2, cx + rx * w2, cy - h2, cz + rz * w2, cx + rx * w2, cy + h2, cz + rz * w2, cx - rx * w2, cy + h2, cz - rz * w2);
-          SU.push(u0, v0, u0 + 0.5, v0, u0 + 0.5, v0 + 0.5, u0, v0 + 0.5);
-          for (let q = 0; q < 4; q++) SC.push(tone[0], tone[1], tone[2]);
-          SI.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
-        }
-        const sgm = new THREE.BufferGeometry();
-        sgm.setAttribute('position', new THREE.Float32BufferAttribute(SP, 3)); sgm.setAttribute('uv', new THREE.Float32BufferAttribute(SU, 2)); sgm.setAttribute('color', new THREE.Float32BufferAttribute(SC, 3)); sgm.setIndex(SI);
-        this._geoms.push(sgm);
-        const smt = new THREE.MeshBasicMaterial({ map: ctex, vertexColors: true, transparent: true, opacity: 0.8, depthWrite: false, depthTest: false, fog: false, side: THREE.DoubleSide });
-        this._mats.push(smt);
-        const sm2 = new THREE.Mesh(sgm, smt); sm2.renderOrder = -994; this._follow(sm2, -0.004); this._add(sm2);
-      }
       if (fx.indexOf('aurora') >= 0 && mode !== 'indoor') {
         // curtains of light: additive vertex-coloured ribbons, bright at the lower edge fading upward
         const AP = [], AC = [], AI = [], R3 = 262, segs = 36;
