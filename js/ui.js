@@ -118,10 +118,17 @@
     scr.idx = i;
     refreshIdx(scr, silent);
   }
+  const SCR_ORDER = { title: 0, main: 1, records: 2, options: 2, setup: 2, cc: 3, btype: 3, arenas: 4, chars: 5, karts: 6, cups: 7, courses: 7 };
+  const scrOrder = (el) => { for (const k in SCR_ORDER) if (el.classList.contains(k)) return SCR_ORDER[k]; return 2; };
+  let lastOrder = -1;
   function mount(scr) {
     destroyActive();
     clearMenus();
     menuLayer.classList.remove('hidden');
+    const ord = scrOrder(scr.el);
+    scr.el.classList.add(lastOrder < 0 || ord === lastOrder ? 'tr-pop' : ord > lastOrder ? 'tr-fwd' : 'tr-bck');
+    lastOrder = ord;
+    menuLayer.classList.toggle('is-title', scr.el.classList.contains('title'));
     menuBox.appendChild(scr.el);
     active = scr;
     scr.idx = clamp(scr.idx || 0, 0, Math.max(0, scr.items.length - 1));
@@ -136,6 +143,7 @@
     });
     if (scr.items.length) refreshIdx(scr, true);
     if (scr.start) scr.start();
+    Shots.resume();
   }
   function moveIdx(scr, act) {
     const n = scr.items.length, c = scr.cols || 1;
@@ -253,6 +261,184 @@
     return th;
   }
 
+
+  // ------------------------------------------------------------------ screenshot service (real in-engine renders)
+  // Builds each course with the real G.Track / G.Arena in an off-screen scene, renders ONE frame with a single reused
+  // renderer, caches the JPEG data-URL and disposes everything. Work is spaced out with idle callbacks.
+  const Shots = (function () {
+    const W = 480, H = 270, SS = 'tt-shot-v3:';
+    const cache = {}, waiting = {}, queue = [];
+    let renderer = null, busy = false, pumpT = 0, killT = 0;
+    const ssGet = (k) => { try { return sessionStorage.getItem(SS + k); } catch (e) { return null; } };
+    const ssSet = (k, v) => { try { sessionStorage.setItem(SS + k, v); } catch (e) { /* full / blocked */ } };
+    const later = (fn, ms) => {
+      setTimeout(() => {
+        if (window.requestIdleCallback) window.requestIdleCallback(fn, { timeout: 700 }); else fn();
+      }, ms == null ? 40 : ms);
+    };
+    const CREWS = [['comet_coupe', 'blaze', 'ember'], ['blossom_cruiser', 'rosa', 'lily'], ['dino_dozer', 'krag', 'krik'], ['bubble_buggy', 'bitsy', 'bop'], ['rally_rover', 'ember', 'blaze'], ['turbo_tub', 'pip', 'pop']];
+    function ensureRenderer() {
+      if (renderer) return renderer;
+      const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: true });
+      renderer.setPixelRatio(1); renderer.setSize(W, H, false);
+      return renderer;
+    }
+    function killRenderer() {
+      if (!renderer) return;
+      try { renderer.dispose(); renderer.forceContextLoss && renderer.forceContextLoss(); } catch (e) { /* ignore */ }
+      renderer = null;
+    }
+    function putKarts(scene, spots, seed) {
+      spots.forEach((s, i) => {
+        const c = CREWS[(seed + i) % CREWS.length];
+        try {
+          const m = G.Characters.buildKart(c[0], c[1], c[2]);
+          m.group.position.set(s.x, s.y || 0, s.z); m.group.rotation.y = s.heading || 0;
+          scene.add(m.group);
+        } catch (e) { /* ignore */ }
+      });
+    }
+    function compose(kind, id, scene) {
+      const seed = id.length + id.charCodeAt(0);
+      const cam = new THREE.PerspectiveCamera(54, W / H, 0.3, 2500);
+      let obj;
+      if (kind === 'arena') {
+        obj = new G.Arena(id, scene, {});
+        scene.updateMatrixWorld(true);
+        const rc = new THREE.Raycaster();
+        const grid = obj.getStartGrid(4);
+        let best = null;
+        // pick an unobstructed vantage (some arenas have big blocks / pipes in the way of a fixed camera)
+        search: for (const dist of [10.5, 14, 8]) {
+          for (const hgt of [4.4, 7.5]) {
+            for (let gi = 0; gi < grid.length; gi++) {
+              const g = grid[gi], l = Math.hypot(g.x, g.z) || 1, ux = g.x / l, uz = g.z / l, tx = -uz, tz = ux, gy = g.y || 0;
+              const pos = new THREE.Vector3(g.x + ux * dist + tx * 3.2, gy + hgt, g.z + uz * dist + tz * 3.2);
+              const tgt = new THREE.Vector3(g.x - ux * 12, gy + 1.6, g.z - uz * 12);
+              const cand = { g, ux, uz, tx, tz, gy, pos, tgt };
+              if (!best) best = cand;
+              let clear = true;
+              for (const q of [tgt, new THREE.Vector3(g.x, gy + 1, g.z)]) {
+                const dir = pos.clone().sub(q), len = dir.length();
+                rc.set(q, dir.normalize()); rc.far = len - 0.2;
+                if (rc.intersectObjects(scene.children, true).length) { clear = false; break; }
+              }
+              if (clear) { best = cand; break search; }
+            }
+          }
+        }
+        const { g, ux, uz, tx, tz, gy } = best;
+        const spots = [];
+        for (let k = 0; k < 3; k++) {
+          const o = (k - 1) * 4.6, back = k === 1 ? 0 : 2.4;
+          spots.push({ x: g.x + tx * o - ux * back, y: gy, z: g.z + tz * o - uz * back, heading: Math.atan2(-ux, -uz) + (k - 1) * 0.25 });
+        }
+        putKarts(scene, spots, seed);
+        cam.position.copy(best.pos);
+        cam.lookAt(best.tgt);
+        cam.fov = 60;
+      } else {
+        obj = new G.Track(id, scene, {});
+        const L = obj.length;
+        const grid = obj.getStartGrid(4);
+        putKarts(scene, grid.map((s) => ({ x: s.x, y: s.y, z: s.z, heading: s.heading })), seed);
+        const cp = obj.pointAt(L - 27), tp = obj.pointAt(L + 22);
+        cam.position.set(cp.x + cp.rx * 5, cp.y + 5.6, cp.z + cp.rz * 5);
+        cam.lookAt(tp.x, tp.y + 2.2, tp.z);
+      }
+      cam.updateProjectionMatrix();
+      return { obj, cam };
+    }
+    function job(key, done) {
+      const kind = key.split(':')[0], id = key.slice(kind.length + 1);
+      const t0 = performance.now(), dbg = (m) => { if (window.__shotLog) console.log('[shot]', key, m, Math.round(performance.now() - t0) + 'ms'); };
+      dbg('start');
+      let scene = null, built = null, savedSun = null;
+      const fin = (url) => {
+        try { if (built && built.obj && built.obj.dispose) built.obj.dispose(); } catch (e) { /* ignore */ }
+        try { if (scene) scene.children.slice().forEach((o) => { if (o.name && o.name.indexOf('kart_') === 0) scene.remove(o); }); } catch (e) { /* ignore */ }
+        try { if (savedSun && G.GFX) { G.GFX.sunDir.copy(savedSun.d); G.GFX.sunColor.copy(savedSun.c); } } catch (e) { /* ignore */ }
+        try { renderer && renderer.renderLists && renderer.renderLists.dispose(); } catch (e) { /* ignore */ }
+        done(url);
+      };
+      later(() => {
+        try {
+          ensureRenderer();
+          if (G.GFX && G.GFX.sunDir) savedSun = { d: G.GFX.sunDir.clone(), c: G.GFX.sunColor.clone() };
+          scene = new THREE.Scene();
+          built = compose(kind, id, scene);
+          dbg('built');
+        } catch (e) { console.warn('shot build', key, e); return fin(null); }
+        later(() => {
+          let url = null;
+          try {
+            renderer.render(scene, built.cam);
+            url = renderer.domElement.toDataURL('image/jpeg', 0.85);
+            dbg('rendered');
+          } catch (e) { console.warn('shot render', key, e); }
+          fin(url);
+        }, 30);
+      }, 30);
+    }
+    function pump() {
+      if (busy || pumpT) return;
+      if (!queue.length) {
+        if (!killT) killT = setTimeout(() => { killT = 0; if (!busy && !queue.length) killRenderer(); }, 2500);
+        return;
+      }
+      if (!menuLayer || menuLayer.classList.contains('hidden') || document.hidden) { // never build during a race; free the GL context
+        if (!busy && !killT) killT = setTimeout(() => { killT = 0; if (!busy) killRenderer(); }, 1500);
+        return;
+      }
+      if (killT) { clearTimeout(killT); killT = 0; }
+      pumpT = setTimeout(() => {
+        pumpT = 0;
+        const key = queue.shift();
+        if (!key || cache[key] !== undefined) return pump();
+        busy = true;
+        job(key, (url) => {
+          cache[key] = url || false;
+          if (url) ssSet(key, url);
+          const cbs = waiting[key] || []; delete waiting[key];
+          cbs.forEach((cb) => { try { cb(url); } catch (e) { /* ignore */ } });
+          busy = false;
+          pump();
+        });
+      }, 90);
+    }
+    return {
+      // returns the data URL immediately when cached, else queues (urgent -> front) and calls cb later
+      get(key, cb, urgent) {
+        if (!key) return null;
+        if (cache[key] === undefined) { const s = ssGet(key); if (s) cache[key] = s; }
+        if (cache[key] !== undefined) { cb && cb(cache[key] || null); return cache[key] || null; }
+        (waiting[key] = waiting[key] || []).push(cb || (() => {}));
+        const qi = queue.indexOf(key);
+        if (qi < 0) { if (urgent) queue.unshift(key); else queue.push(key); }
+        else if (urgent && qi > 0) { queue.splice(qi, 1); queue.unshift(key); }
+        pump();
+        return null;
+      },
+      resume: pump,
+      ready: (key) => !!cache[key],
+    };
+  })();
+  const trackKey = (t) => (t ? 'track:' + t.id : null);
+  const arenaKey = (a) => (a ? 'arena:' + a.id : null);
+  function shotSet(d, key, urgent) {
+    d._key = key;
+    d.classList.remove('ready', 'fail'); d.classList.add('shimmer'); d.style.backgroundImage = '';
+    if (!key) { d.classList.remove('shimmer'); d.classList.add('fail'); return d; }
+    Shots.get(key, (u) => {
+      if (d._key !== key) return;
+      d.classList.remove('shimmer');
+      if (u) { d.style.backgroundImage = 'url(' + u + ')'; d.classList.add('ready'); } else d.classList.add('fail');
+    }, urgent);
+    return d;
+  }
+  const shotEl = (key, cls, urgent) => shotSet($('div', 'shot ' + (cls || '')), key, urgent);
+
   // ------------------------------------------------------------------ launching
   function playerList() {
     const base = F.picks.slice(0, F.coop ? 1 : F.n).map((p) => ({ front: p.front, rear: p.rear, kart: p.kart }));
@@ -281,38 +467,88 @@
   }
 
   // ------------------------------------------------------------------ title
+  const HERO_CREWS = [['comet_coupe', 'blaze', 'ember'], ['blossom_cruiser', 'rosa', 'lily'], ['turbo_tub', 'pip', 'pop'], ['dino_dozer', 'krag', 'krik'], ['bubble_buggy', 'bitsy', 'bop'], ['thunder_tank', 'volt', 'vex']];
+  let heroN = 0;
+  const STAR4 = '<svg viewBox="0 0 40 40"><path d="M20 0C22 12 28 18 40 20 28 22 22 28 20 40 18 28 12 22 0 20 12 18 18 12 20 0z" fill="currentColor"/></svg>';
+  function logoSVG() {
+    const word = (txt, x, y, size, len, g, ink) => {
+      const a = 'x="' + x + '" y="' + y + '" font-size="' + size + '" textLength="' + len + '" lengthAdjust="spacingAndGlyphs"';
+      return '<text ' + a + ' class="lt" fill="#0d1040" stroke="#0d1040" stroke-width="44" stroke-linejoin="round" transform="translate(0 16)">' + txt + '</text>' +
+        '<text ' + a + ' class="lt" fill="#fff" stroke="#fff" stroke-width="34" stroke-linejoin="round">' + txt + '</text>' +
+        '<text ' + a + ' class="lt" fill="url(#' + g + ')" stroke="' + ink + '" stroke-width="14" stroke-linejoin="round" paint-order="stroke fill">' + txt + '</text>' +
+        '<text ' + a + ' class="lt" fill="url(#gloss)" stroke="none">' + txt + '</text>';
+    };
+    return '<svg class="logo-svg" viewBox="0 0 1000 400" aria-label="Turbo Tandem">' +
+      '<defs>' +
+      '<linearGradient id="gY" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fffbd0"/><stop offset=".3" stop-color="#ffe54a"/><stop offset=".65" stop-color="#ffb01f"/><stop offset="1" stop-color="#ff6a1a"/></linearGradient>' +
+      '<linearGradient id="gC" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#eafffe"/><stop offset=".3" stop-color="#5cf0ff"/><stop offset=".68" stop-color="#1e8fff"/><stop offset="1" stop-color="#3a3fe8"/></linearGradient>' +
+      '<linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset=".46" stop-color="#fff" stop-opacity=".35"/><stop offset=".47" stop-color="#fff" stop-opacity="0"/></linearGradient>' +
+      '<linearGradient id="sheen" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".95"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>' +
+      '<clipPath id="clipW"><text x="60" y="205" font-size="232" textLength="880" lengthAdjust="spacingAndGlyphs" class="lt">TURBO</text><text x="40" y="378" font-size="188" textLength="920" lengthAdjust="spacingAndGlyphs" class="lt">TANDEM</text></clipPath>' +
+      '</defs>' +
+      '<g transform="skewX(-6) translate(48 0)">' +
+      '<g class="w1">' + word('TURBO', 60, 205, 232, 880, 'gY', '#7a2a00') + '</g>' +
+      '<g class="w2">' + word('TANDEM', 40, 378, 188, 920, 'gC', '#0b2a8a') + '</g>' +
+      '<g clip-path="url(#clipW)"><rect class="sheen" x="-200" y="0" width="150" height="420" fill="url(#sheen)" transform="skewX(-20)"/></g>' +
+      '</g></svg>';
+  }
   function showTitle() {
     G.UI.init();
     hideOverlays();
     try { G.Sound && G.Sound.playMusic && G.Sound.playMusic('menu'); } catch (e) {}
     const el = $('section', 'screen title');
-    const logo = $('div', 'logo');
-    const spans = (t, o) => t.split('').map((ch, i) => '<span style="--i:' + (i + o) + '">' + ch + '</span>').join('');
-    logo.innerHTML = '<span class="l1">' + spans('TURBO', 0) + '</span><span class="l2">' + spans('TANDEM', 5) + '</span>';
+    el.appendChild($('div', 'tbg', '<div class="sun"></div><div class="slant a"></div><div class="slant b"></div><div class="slant c"></div><div class="chk t"></div><div class="chk b"></div><div class="tvig"></div>'));
+    const logo = $('div', 'logo', logoSVG());
     el.appendChild(logo);
-    el.appendChild($('div', 'subtitle', '<span>DOUBLE TROUBLE GRAND PRIX</span>'));
-    el.appendChild($('div', 'press', 'PRESS ENTER / CLICK TO START'));
+    el.appendChild($('div', 'ribbon', '<span><i>★</i> DOUBLE TROUBLE GRAND PRIX <i>★</i></span>'));
+    const hero = $('div', 'hero');
+    hero.appendChild($('div', 'halo'));
+    const cv = $('canvas', 'hero-cv');
+    hero.appendChild(cv);
+    const sp = [[8, 20, 2.6, 0], [20, 6, 1.8, .6], [34, 14, 2.2, 1.1], [52, 4, 1.6, .3], [70, 12, 2.4, .9], [86, 24, 2.8, .2], [92, 52, 1.8, 1.3], [4, 56, 2, .7], [14, 78, 1.6, 1.5], [80, 78, 2.2, .4], [60, 90, 1.5, 1], [28, 92, 1.9, .5]];
+    sp.forEach((s) => { const i = $('i', 'spk', STAR4); i.style.cssText = 'left:' + s[0] + '%;top:' + s[1] + '%;width:' + s[2] + 'rem;height:' + s[2] + 'rem;animation-delay:-' + s[3] + 's;animation-duration:' + (1.5 + s[3]) + 's'; hero.appendChild(i); });
+    el.appendChild(hero);
+    el.appendChild($('div', 'press', '<span>PRESS START</span><small>ENTER · CLICK · A BUTTON</small>'));
     el.appendChild($('div', 'sticker', '<div>2 RIDERS<em>1</em>KART</div>'));
-    const scr = { el, items: [], cols: 1, idx: 0, pick: () => showMain() };
+    el.appendChild($('div', 'fine', 'ORIGINAL CHARACTERS · FAN PROJECT · INTERNAL BUILD'));
+    let stage = null;
+    const scr = {
+      el, items: [], cols: 1, idx: 0, pick: () => showMain(),
+      start() {
+        stage = makePreview(cv, { hero: true });
+        if (stage) { const c = HERO_CREWS[heroN++ % HERO_CREWS.length]; stage.set(c[0], c[1], c[2]); }
+        // warm the screenshots the main menu shows, one at a time
+        mainShotKeys().forEach((k) => Shots.get(k));
+      },
+      destroy() { if (stage) { stage.destroy(); stage = null; } },
+    };
     el.addEventListener('click', () => { if (active === scr && !ovl) { initSound(); snd('menu_select'); showMain(); } });
     mount(scr);
   }
 
   // ------------------------------------------------------------------ main menu
+  function mainShotKeys() {
+    const cl = cupList();
+    const t = (ci, n) => { const ts = cl[ci] ? tracksOfCup(cl[ci].id) : []; return trackKey(ts[n]); };
+    return [t(0, 0), t(2, 1) || t(0, 2), t(1, 2) || t(0, 1), (G.ARENAS && G.ARENAS[0]) ? arenaKey(G.ARENAS[0]) : null].filter(Boolean);
+  }
   function showMain() {
     const el = screenEl('main', 'MAIN MENU', 'choose how to race');
     const grid = $('div', 'main-grid');
+    const sk = mainShotKeys();
     const defs = [
-      { id: 'gp', t: 'GRAND PRIX', s: 'Cups · points · trophies', ic: 'trophy', c: '#ff8a1e', c2: '#ffc72c' },
-      { id: 'tt', t: 'TIME TRIAL', s: 'Beat the clock & ghosts', ic: 'clock', c: '#19b6f0', c2: '#5fe3ff' },
-      { id: 'vs', t: 'VERSUS', s: '2–4 players, any course', ic: 'versus', c: '#ff4d5a', c2: '#ff8a7a' },
-      { id: 'battle', t: 'BATTLE', s: 'Balloons · Shine · Bombs', ic: 'battle', c: '#ff5ab0', c2: '#ffa0d6' },
+      { id: 'gp', t: 'GRAND PRIX', s: 'Cups · points · trophies', ic: 'trophy', c: '#ff8a1e', c2: '#ffc72c', shot: sk[0] },
+      { id: 'tt', t: 'TIME TRIAL', s: 'Beat the clock & ghosts', ic: 'clock', c: '#19b6f0', c2: '#5fe3ff', shot: sk[1] },
+      { id: 'vs', t: 'VERSUS', s: '2–4 players, any course', ic: 'versus', c: '#ff4d5a', c2: '#ff8a7a', shot: sk[2] },
+      { id: 'battle', t: 'BATTLE', s: 'Balloons · Shine · Bombs', ic: 'battle', c: '#ff5ab0', c2: '#ffa0d6', shot: sk[3] },
       { id: 'records', t: 'RECORDS', s: 'Best times & laps', ic: 'records', c: '#7a3cff', c2: '#a98bff' },
       { id: 'options', t: 'OPTIONS', s: 'Sound · save data', ic: 'options', c: '#2fbf5f', c2: '#7be39a' },
     ];
     const items = defs.map((d) => {
-      const b = $('div', 'btn', ICONS[d.ic] + '<div class="tx"><b>' + d.t + '</b><i>' + d.s + '</i></div>');
+      const b = $('div', 'btn' + (d.shot ? ' has-shot' : ' no-shot'), ICONS[d.ic] + '<div class="tx"><b>' + d.t + '</b><i>' + d.s + '</i></div>');
       b.style.setProperty('--c', d.c); b.style.setProperty('--c2', d.c2);
+      if (d.shot) b.appendChild(shotEl(d.shot, 'bshot'));
+      else b.appendChild($('div', 'bshot big-ic', ICONS[d.ic]));
       grid.appendChild(b);
       return b;
     });
@@ -346,7 +582,22 @@
       const row = $('div', 'row ' + (r.type || 'choice') + (r.cls ? ' ' + r.cls : ''));
       row.appendChild($('div', 'rl', '')).textContent = r.label || '';
       if (r.type === 'slider') {
-        row.appendChild($('div', 'slider', '<div class="trk"><i></i></div><b></b>'));
+        const sl = $('div', 'sldr', '<div class="trk"><i></i><u></u></div><b></b>');
+        row.appendChild(sl);
+        const trk = sl.querySelector('.trk');
+        let drag = false;
+        const fromEv = (e) => { const bx = trk.getBoundingClientRect(); return clamp(Math.round(((e.clientX - bx.left) / Math.max(1, bx.width)) * 100) / 100, 0, 1); };
+        const setFrom = (e) => { const v = fromEv(e); if (v !== r.get()) { r.set(v); scr && scr.repaint && scr.repaint(); } };
+        sl.addEventListener('pointerdown', (e) => {
+          if (!scr || active !== scr || e.button > 0) return;
+          drag = true; initSound();
+          try { sl.setPointerCapture(e.pointerId); } catch (er) { /* ignore */ }
+          const i = rows.indexOf(r); if (scr.idx !== i) setIdx(scr, i);
+          setFrom(e); e.preventDefault();
+        });
+        sl.addEventListener('pointermove', (e) => { if (drag) setFrom(e); });
+        const end = () => { if (drag) { drag = false; r.done && r.done(); } };
+        sl.addEventListener('pointerup', end); sl.addEventListener('pointercancel', end); sl.addEventListener('lostpointercapture', end);
       } else if (r.type === 'button') {
         row.classList.add('rbtn');
         if (r.sub) row.appendChild($('div', 'rs')).textContent = r.sub;
@@ -356,7 +607,7 @@
           const chip = $('span', 'chip');
           chip.textContent = c.t;
           if (c.lock) chip.appendChild($('em', 'lk', ICONS.lock));
-          chip.addEventListener('click', (e) => { e.stopPropagation(); if (c.lock) return shakeEl(chip); r.set(c.v); snd('menu_select'); opts.changed && opts.changed(r); });
+          chip.addEventListener('click', (e) => { e.stopPropagation(); if (c.lock) return shakeEl(chip); r.set(c.v); paint(); snd('menu_select'); opts.changed && opts.changed(r); });
           ch.appendChild(chip);
         });
         row.appendChild(ch);
@@ -365,12 +616,14 @@
       return row;
     });
     el.appendChild(list);
+    let scr = null;
     const paint = () => {
       rows.forEach((r, i) => {
         const row = items[i];
         if (r.type === 'slider') {
           const v = r.get();
           row.querySelector('.trk i').style.width = Math.round(v * 100) + '%';
+          row.querySelector('.trk').style.setProperty('--v', Math.round(v * 100) + '%');
           row.querySelector('b').textContent = Math.round(v * 100);
         } else if (r.type !== 'button') {
           const cur = r.get();
@@ -380,7 +633,7 @@
       });
     };
     paint();
-    const scr = {
+    scr = {
       el, items, cols: 1, idx: opts.idx || 0,
       pick(i) {
         const r = rows[i];
@@ -392,7 +645,8 @@
         if (act !== 'left' && act !== 'right') return false;
         const r = rows[scr.idx], d = act === 'left' ? -1 : 1;
         if (r.type === 'slider') {
-          r.set(clamp(Math.round((r.get() + d * 0.1) * 10) / 10, 0, 1)); paint(); snd('menu_move');
+          r.set(clamp(Math.round((r.get() + d * 0.05) * 100) / 100, 0, 1)); paint(); if (!r.blip) snd('menu_move');
+          r.done && r.done();
           return true;
         }
         if (r.choices) {
@@ -511,6 +765,7 @@
       const card = $('div', 'card arena-card', '<div class="in"><div class="athumb"></div><div class="nm"></div></div>');
       card.style.setProperty('--c', cols[i % cols.length]);
       card.querySelector('.nm').textContent = a.name || prettify(a.id);
+      card.querySelector('.athumb').appendChild(shotEl(arenaKey(a), 'ashot'));
       row.appendChild(card);
       return card;
     });
@@ -518,6 +773,7 @@
     el.appendChild(row);
     mount({
       el, items, cols: Math.max(1, Math.min(4, items.length)), idx: Math.max(0, arenas.findIndex((a) => a.id === F.arena)),
+      onFocus(i) { const a = arenas[i]; if (a) Shots.get(arenaKey(a), null, true); },
       pick(i) { if (!arenas[i]) return; F.arena = arenas[i].id; startChars(false); },
       back: showBattleType,
     });
@@ -557,6 +813,7 @@
     }
     top.appendChild(slots);
     el.appendChild(top);
+    const cmain = $('div', 'char-main');
     const grid = $('div', 'char-grid');
     const items = [];
     list.forEach((c) => {
@@ -570,7 +827,28 @@
     });
     const rnd = $('div', 'card rand-card', '<div class="in"><span class="dice"></span>RANDOM</div>');
     grid.appendChild(rnd); items.push(rnd);
-    el.appendChild(grid);
+    cmain.appendChild(grid);
+    const cstage = $('div', 'char-stage', '<div class="halo"></div><canvas class="char-cv"></canvas><div class="cs-pair"></div><div class="cs-kart"></div>');
+    cmain.appendChild(cstage);
+    el.appendChild(cmain);
+    const ccv = cstage.querySelector('canvas');
+    let cprev = null, pvKey = '';
+    const showPair = (id) => {
+      const c = charById(id), st = cur();
+      if (!cprev || !c || !charOpen(c) || !st) return;
+      const mine = F.picks[st.p];
+      let front, rear;
+      if (st.role === 'front') { front = id; rear = mine.rear || c.partner; } else { rear = id; front = mine.front || c.partner; }
+      if (!front || front === rear) { front = id; rear = c.partner; }
+      const key = front + '|' + rear;
+      if (key === pvKey) return;
+      pvKey = key;
+      const ks = kartsFor(front, rear);
+      const k = ks.find((q) => (q.owner === front || q.owner === rear) && kartOpen(q)) || ks.find(kartOpen) || ks[0];
+      if (k) cprev.set(k.id, front, rear);
+      cstage.querySelector('.cs-pair').textContent = charName(front) + ' & ' + charName(rear);
+      cstage.querySelector('.cs-kart').textContent = k ? k.name : '';
+    };
     const info = $('div', 'char-info', '<div class="ci-nm"></div><div class="ci-tag"></div><div class="ci-sp"></div>');
     el.appendChild(info);
     el.appendChild($('div', 'nav-hint', '<span><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> Move</span><span><kbd>Enter</kbd> Pick</span><span><kbd>Esc</kbd> Undo / Back</span>'));
@@ -609,6 +887,7 @@
       info.querySelector('.ci-nm').textContent = lock ? 'LOCKED' : c.name + ' · ' + c.weight.toUpperCase();
       info.querySelector('.ci-tag').textContent = lock ? 'Win cups to unlock this driver.' : (c.tagline || '');
       info.querySelector('.ci-sp').textContent = !lock && c.special ? 'Special item: ' + (c.special === 'all' ? 'Any special' : itemName(c.special)) : '';
+      showPair(c.id);
     };
     refresh();
     let busy = false;
@@ -632,6 +911,7 @@
         F.picks[st.p][st.role] = id;
         F.step++;
         refresh();
+        pvKey = ''; if (F.step < steps.length) focus(scr.idx);
         if (F.step >= steps.length) {
           busy = true;
           setTimeout(() => { busy = false; if (active === scr) { F.kartIdx = 0; showKarts(0); } }, 380);
@@ -640,9 +920,11 @@
       back() {
         if (busy) return;
         if (F.step > 0) {
-          F.step--; const st = steps[F.step]; F.picks[st.p][st.role] = null; refresh();
+          F.step--; const st = steps[F.step]; F.picks[st.p][st.role] = null; refresh(); pvKey = ''; focus(scr.idx);
         } else backFromChars();
       },
+      start() { cprev = makePreview(ccv); if (!cprev) cstage.classList.add('nogl'); else focus(scr.idx); },
+      destroy() { if (cprev) { cprev.destroy(); cprev = null; } },
     };
     mount(scr);
     if (F.step >= steps.length) { F.step = steps.length - 1; const st = steps[F.step]; F.picks[st.p][st.role] = null; refresh(); }
@@ -667,21 +949,24 @@
   }
   const kartStatsDef = [['speed', 'SPEED'], ['accel', 'ACCEL'], ['handling', 'HANDLING'], ['mass', 'WEIGHT']];
 
-  function makePreview(canvas) {
+  // live 3D stage on its own small alpha renderer. opts.hero => swinging 3/4 "poster" pose with bounce + rider wave
+  function makePreview(canvas, opts) {
+    opts = opts || {};
     if (!window.THREE) return null;
     let renderer;
     try { renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, preserveDrawingBuffer: false }); } catch (e) { return null; }
     renderer.setClearColor(0x000000, 0);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, opts.hero ? 1.5 : 2));
     const scene = new THREE.Scene();
     scene.add(new THREE.HemisphereLight(0xffffff, 0x6a7cff, 0.95));
     const dl = new THREE.DirectionalLight(0xffffff, 0.9); dl.position.set(4, 8, 5); scene.add(dl);
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(2.1, 32), new THREE.MeshBasicMaterial({ color: 0x1a1f5c, transparent: true, opacity: 0.28 }));
+    const rim = new THREE.DirectionalLight(0x9ad0ff, 0.55); rim.position.set(-5, 3, -4); scene.add(rim);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(opts.hero ? 2.5 : 2.1, 32), new THREE.MeshBasicMaterial({ color: 0x1a1f5c, transparent: true, opacity: 0.28 }));
     disc.rotation.x = -Math.PI / 2; disc.position.y = 0.01; scene.add(disc);
-    const cam = new THREE.PerspectiveCamera(32, 1, 0.1, 60);
-    cam.position.set(4.4, 2.5, 5.6); cam.lookAt(0, 0.55, 0);
-    let spin = new THREE.Group(); scene.add(spin);
-    let w = 0, h = 0, raf = 0, dead = false, last = 0;
+    const cam = new THREE.PerspectiveCamera(opts.hero ? 27 : 32, 1, 0.1, 60);
+    if (opts.hero) { cam.position.set(0.4, 2.0, 6.6); cam.lookAt(0, 0.75, 0); } else { cam.position.set(4.4, 2.5, 5.6); cam.lookAt(0, 0.55, 0); }
+    let spin = new THREE.Group(), kart = null; scene.add(spin);
+    let w = 0, h = 0, raf = 0, dead = false, last = 0, tt = 0;
     const size = () => {
       const cw = canvas.clientWidth | 0, ch = canvas.clientHeight | 0;
       if (cw && ch && (cw !== w || ch !== h)) { w = cw; h = ch; renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); }
@@ -692,21 +977,33 @@
       if (document.hidden || !canvas.isConnected || menuLayer.classList.contains('hidden')) { last = t; return; }
       size();
       if (!w) return;
-      const dt = Math.min(0.05, (t - (last || t)) / 1000); last = t;
-      spin.rotation.y += dt * 0.9;
+      const dt = Math.min(0.05, (t - (last || t)) / 1000); last = t; tt += dt;
+      if (opts.hero) {
+        spin.rotation.y = 0.62 + Math.sin(tt * 0.7) * 0.5;
+        spin.position.y = Math.abs(Math.sin(tt * 3.1)) * 0.07;
+        spin.rotation.z = Math.sin(tt * 3.1) * 0.012;
+      } else spin.rotation.y += dt * 0.9;
+      if (kart) {
+        // riders wave / bob in time
+        if (kart.front) { kart.front.rotation.z = Math.sin(tt * 5.2) * 0.1; kart.front.position.y = (kart.front._by || 0) + Math.abs(Math.sin(tt * 3.1 + 0.5)) * 0.05; }
+        if (kart.rear) { kart.rear.rotation.z = Math.sin(tt * 4.4 + 1.6) * -0.12; kart.rear.position.y = (kart.rear._by || 0) + Math.abs(Math.sin(tt * 3.1 + 1.2)) * 0.07; }
+      }
       renderer.render(scene, cam);
     };
     raf = requestAnimationFrame(loop);
     return {
       set(kartId, front, rear) {
         scene.remove(spin);
-        spin = new THREE.Group();
+        const ry = spin.rotation.y;
+        spin = new THREE.Group(); kart = null;
         if (kartId) try {
           const m = G.Characters.buildKart(kartId, front, rear);
           m.group.position.set(0, 0, 0);
-          spin.add(m.group);
+          if (m.front) m.front._by = m.front.position.y;
+          if (m.rear) m.rear._by = m.rear.position.y;
+          spin.add(m.group); kart = m;
         } catch (e) { console.warn('kart preview', e); }
-        spin.rotation.y = 0.6;
+        spin.rotation.y = opts.hero ? ry : 0.6;
         scene.add(spin);
       },
       destroy() {
@@ -798,20 +1095,27 @@
     else showCourses();
   }
 
-  // ------------------------------------------------------------------ cups
+  // ------------------------------------------------------------------ cups (mosaic of real course screenshots)
   function showCups() {
     const cups = cupList().concat([{ id: 'allcup', name: CUP_DEFAULT_NAMES.allcup }]);
     const el = screenEl('cups', 'CHOOSE CUP', 'four courses · points decide the champ');
     const row = $('div', 'cup-row');
+    const cupShots = (c) => {
+      if (c.id === 'allcup') return cupList().map((cc) => trackKey(tracksOfCup(cc.id)[0])).slice(0, 4);
+      return tracksOfCup(c.id).slice(0, 4).map(trackKey);
+    };
     const items = cups.map((c, i) => {
       const st = cupStyle(c.id, i);
       const lock = !cupOpen(c.id);
       const ts = tracksOfCup(c.id);
-      const names = c.id === 'allcup' ? '<li class="all">ALL 16 COURSES</li><li class="all">IN CUP ORDER</li>' : ts.map((t, n) => '<li><b>' + (n + 1) + '</b><span></span></li>').join('');
-      const card = $('div', 'card cup-card' + (lock ? ' locked' : ''), '<div class="in"><div class="cupico">' + ICONS.trophy + '</div><div class="nm"></div><ul>' + names + '</ul></div>');
+      const names = c.id === 'allcup' ? '<li class="all">ALL ' + (G.TRACKS || []).length + ' COURSES</li>' : ts.map((t, n) => '<li><b>' + (n + 1) + '</b><span></span></li>').join('');
+      const card = $('div', 'card cup-card' + (lock ? ' locked' : ''), '<div class="in"><div class="cupico">' + ICONS.trophy + '</div><div class="mosaic"></div><div class="nm"></div><ul>' + names + '</ul></div>');
       card.style.setProperty('--c', st.c); card.style.setProperty('--c2', st.c2);
       card.querySelector('.nm').textContent = c.name || CUP_DEFAULT_NAMES[c.id];
-      if (c.id !== 'allcup') card.querySelectorAll('li span').forEach((s, n) => { s.textContent = ts[n] ? ts[n].name : '—'; });
+      const mo = card.querySelector('.mosaic');
+      card._keys = cupShots(c);
+      card._keys.forEach((k) => mo.appendChild(shotEl(k, 'mi')));
+      if (c.id !== 'allcup') card.querySelectorAll('li span').forEach((s, n) => { s.textContent = ts[n] ? (lock ? '???' : ts[n].name) : '—'; });
       if (lock) card.appendChild(lockBadge());
       row.appendChild(card);
       return card;
@@ -819,6 +1123,7 @@
     el.appendChild(row);
     mount({
       el, items, cols: items.length, idx: Math.max(0, cups.findIndex((c) => c.id === F.cup)),
+      onFocus(i) { const c = items[i]; if (c) c._keys.slice().reverse().forEach((k) => Shots.get(k, null, true)); },
       pick(i) {
         if (!cupOpen(cups[i].id)) return shakeEl(items[i]);
         F.cup = cups[i].id; launch({ cup: cups[i].id });
@@ -827,10 +1132,11 @@
     });
   }
 
-  // ------------------------------------------------------------------ courses (VS / TT): all 16 grouped by cup
+  // ------------------------------------------------------------------ courses (VS / TT): all courses by cup + big live-engine preview
   function showCourses() {
     const cups = cupList();
     const el = screenEl('courses', F.mode === 'tt' ? 'TIME TRIAL' : 'CHOOSE COURSE', 'every course, grouped by cup');
+    const wrap = $('div', 'course-wrap');
     const board = $('div', 'course-board');
     const items = [], colIdx = [];
     cups.forEach((c, ci) => {
@@ -842,22 +1148,39 @@
       col.appendChild(hd);
       const idxs = [];
       tracksOfCup(c.id).forEach((t) => {
-        const card = $('div', 'card course-card' + (lock ? ' locked' : ''), '<div class="in"><div class="tn"></div><div class="tl"></div></div>');
-        card.querySelector('.in').insertBefore(thumbEl(t), card.querySelector('.tn'));
+        const card = $('div', 'card course-card' + (lock ? ' locked' : ''), '<div class="in"><div class="tn"></div></div>');
+        card.querySelector('.in').insertBefore(shotEl(lock ? null : trackKey(t), 'cthumb'), card.querySelector('.tn'));
         card.querySelector('.tn').textContent = lock ? '???' : t.name;
-        card.querySelector('.tl').textContent = (t.laps || 3) + ' laps';
-        card._t = t; card._lock = lock;
+        card._t = t; card._lock = lock; card._cup = c;
         if (lock) card.appendChild(lockBadge());
         col.appendChild(card); items.push(card); idxs.push(items.length - 1);
       });
       colIdx.push(idxs);
       board.appendChild(col);
     });
-    el.appendChild(board);
+    wrap.appendChild(board);
+    const pv = $('div', 'cpreview', '<div class="pvframe"></div><div class="pvname"></div><div class="pvcup"></div><div class="pvstats"><div><span>LAPS</span><b class="pl"></b></div><div><span>BEST RACE</span><b class="pb"></b></div><div><span>BEST LAP</span><b class="pa"></b></div></div>');
+    const pvShot = shotEl(null, 'pvshot'); pv.querySelector('.pvframe').appendChild(pvShot);
+    wrap.appendChild(pv);
+    el.appendChild(wrap);
+    const showPv = (i) => {
+      const c = items[i]; if (!c) return;
+      const t = c._t, lock = c._lock;
+      pv.style.setProperty('--c', cupStyle(c._cup.id).c); pv.style.setProperty('--c2', cupStyle(c._cup.id).c2);
+      shotSet(pvShot, lock ? null : trackKey(t), true);
+      pv.querySelector('.pvname').textContent = lock ? 'LOCKED' : t.name;
+      pv.querySelector('.pvcup').textContent = lock ? 'Win cups to unlock' : c._cup.name;
+      let bt = null, bl = null;
+      try { const s = SV(); if (s && !lock) { bt = s.bestTime ? s.bestTime(t.id) : null; bl = s.bestLap ? s.bestLap(t.id) : null; } } catch (e) {}
+      pv.querySelector('.pl').textContent = lock ? '-' : (t.laps || 3);
+      pv.querySelector('.pb').textContent = bt ? fmtTime(bt) : '--:--.--';
+      pv.querySelector('.pa').textContent = bl ? fmtTime(bl) : '--:--.--';
+      pv.classList.remove('flip'); void pv.offsetWidth; pv.classList.add('flip');
+    };
     const posOf = (i) => { for (let c = 0; c < colIdx.length; c++) { const r = colIdx[c].indexOf(i); if (r >= 0) return [c, r]; } return [0, 0]; };
     let start = items.findIndex((c) => c._t.id === F.track);
     const scr = {
-      el, items, cols: 1, idx: Math.max(0, start),
+      el, items, cols: 1, idx: Math.max(0, start), onFocus: showPv,
       onKey(act) {
         const [c, r] = posOf(scr.idx);
         let nc = c, nr = r;
@@ -907,11 +1230,21 @@
   // ------------------------------------------------------------------ options
   function showOptions() {
     const st = settings();
-    const apply = () => { try { G.Sound && G.Sound.setVolumes && G.Sound.setVolumes(st.musicVol, st.sfxVol); } catch (e) {} persist(); };
-    let armed = false, scr = null;
+    const muted = () => { try { return !!(G.Sound && G.Sound.muted); } catch (e) { return false; } };
+    const apply = () => {
+      try { G.Sound && G.Sound.setVolumes && G.Sound.setVolumes(st.musicVol == null ? 0.7 : st.musicVol, st.sfxVol == null ? 0.8 : st.sfxVol); } catch (e) {}
+      persist();
+    };
+    let armed = false, lastBlip = 0;
+    const dim = (row) => row.classList.toggle('muted', muted());
     const rows = [
-      { type: 'slider', label: 'MUSIC', get: () => (st.musicVol == null ? 0.7 : st.musicVol), set: (v) => { st.musicVol = v; apply(); } },
-      { type: 'slider', label: 'SOUND FX', get: () => (st.sfxVol == null ? 0.8 : st.sfxVol), set: (v) => { st.sfxVol = v; apply(); snd('item_get'); } },
+      { type: 'slider', label: 'MUSIC', paint: dim, get: () => (st.musicVol == null ? 0.7 : st.musicVol), set: (v) => { st.musicVol = v; apply(); } },
+      {
+        type: 'slider', label: 'SOUND FX', blip: true, paint: dim, get: () => (st.sfxVol == null ? 0.8 : st.sfxVol),
+        set: (v) => { st.sfxVol = v; apply(); const n = Date.now(); if (n - lastBlip > 110) { lastBlip = n; snd('item_get'); } },
+        done() { lastBlip = 0; },
+      },
+      { label: 'SOUND', choices: [{ v: false, t: 'ON' }, { v: true, t: 'MUTED' }], get: () => muted(), set: (v) => { try { G.Sound && G.Sound.setMuted && G.Sound.setMuted(!!v); } catch (e) {} } },
       { label: 'ITEM FREQUENCY', choices: FREQ, get: () => st.itemFreq || 'normal', set: (v) => { st.itemFreq = v; F.itemFreq = v; persist(); } },
       {
         type: 'button', label: 'UNLOCK EVERYTHING', sub: 'all cups, karts, drivers',
@@ -931,7 +1264,7 @@
         },
       },
     ];
-    scr = rowsScreen({ cls: 'options', title: 'OPTIONS', sub: 'sound & save data', rows, back: showMain });
+    rowsScreen({ cls: 'options', title: 'OPTIONS', sub: 'sound & save data', rows, back: showMain });
   }
 
   // ------------------------------------------------------------------ overlays
@@ -1192,6 +1525,7 @@
       window.addEventListener('pointerdown', initSound, { passive: true });
       window.addEventListener('resize', () => instances.forEach((h) => h._layout()));
       G.HUD._boot();
+      try { const st = settings(); G.Sound && G.Sound.setVolumes && G.Sound.setVolumes(st.musicVol == null ? 0.7 : st.musicVol, st.sfxVol == null ? 0.8 : st.sfxVol); } catch (e) {}
     },
     showTitle,
     showMenu: showMain,
@@ -1206,7 +1540,7 @@
     showGPFinal,
     showUnlocks,
     showBattleResults,
-    _t: { F, showSetup, showCC, startChars, showKarts, showCups, showCourses, showBattleType, showArenas, showRecords, showOptions, launch },
+    _t: { Shots, F, showSetup, showCC, startChars, showKarts, showCups, showCourses, showBattleType, showArenas, showRecords, showOptions, launch },
   };
 
   // ------------------------------------------------------------------ HUD (per-viewport instances)
