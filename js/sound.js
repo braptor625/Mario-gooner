@@ -22,11 +22,11 @@
   const MIN_GAP_MS = 40;
   const VOICE_GAP_MS = 600;
   const VOICE_GLOBAL_GAP_MS = 320;
-  const LOOKAHEAD = 0.22;
+  const LOOKAHEAD = 0.6;
   const TICK_MS = 25;
   const MASTER_VOL = 1.0;
   const MUSIC_BASE = 1.0;
-  const MUSIC_MAKEUP = 1.9;
+  const MUSIC_MAKEUP = 2.8;
   const OUT_TRIM = 0.78;
   const SFX_BASE = 1.0;
   const MAX_ENGINES = 4;
@@ -187,7 +187,7 @@
       sfxIn = ctx.createGain(); sfxIn.gain.value = 1; sfxIn.connect(sfxBus);
       engineBus = ctx.createGain(); engineBus.gain.value = 1; engineBus.connect(sfxBus);
       ambBus = ctx.createGain(); ambBus.gain.value = 1; ambBus.connect(sfxBus);
-      voiceBus = ctx.createGain(); voiceBus.gain.value = 1; voiceBus.connect(sfxBus);
+      voiceBus = ctx.createGain(); voiceBus.gain.value = 1.5; voiceBus.connect(sfxBus);
       musicBus = ctx.createGain(); musicBus.gain.value = MUSIC_BASE * vcurve(musicVol); musicBus.connect(master);
       musicDuck = ctx.createGain(); musicDuck.gain.value = 1;
       // music glue compressor + makeup: tames the kick peaks so the body of the mix can be loud
@@ -832,6 +832,17 @@
     chomp: [0.7, 0.2, 0.4], countdown: [0.78, 0.15, 0.3],
   };
 
+
+  // per-sound loudness trim (measured: brings every effect's peak into the same neighbourhood)
+  const LEVEL = {
+    menu_move: 1.55, menu_select: 2.0, menu_back: 2.1, menu_locked: 3, countdown: 1.3, go: 1.25, item_box: 1.45, roulette: 3,
+    item_get: 1.45, throw: 1.4, drop: 2, shell_hit: 1.13, banana_hit: 1.4, spin: 1.45, explosion: 1.1, boost: 1.5, drift_start: 1.9,
+    charge: 2, hop: 1.1, swap: 1.6, wall: 1.05, lap: 1.5, final_lap: 1.2, finish: 1.25, star: 2.2, lightning: 1.3, fall: 1.5,
+    heart: 1.6, fireball: 2, egg: 1.45, coin_bonus: 2.1, splash: 1.3, ice: 1.4, cannon: 1.15, slipstream: 3, slap: 0.85,
+    rescue: 2.1, chomp: 1.9, balloon_pop: 0.87, shine_get: 2.3, shine_lost: 1.9, bomb_fuse: 2, crowd: 1.4, unlock: 2.6, cheer: 1.6,
+    boing: 1.07, clink: 1.25, whoosh: 3, swell: 1.7, key_up: 3, shrink: 1.85,
+  };
+
   function flushPending() {
     if (!pending.length) return;
     const now = performance.now();
@@ -858,7 +869,7 @@
     const c = {
       v,
       t: ctx.currentTime + 0.005,
-      vol: opts && opts.volume != null ? opts.volume : 1,
+      vol: (opts && opts.volume != null ? opts.volume : 1) * (LEVEL[name] || 1),
       p: opts && opts.pitch ? opts.pitch : 1,
       bus: out,
     };
@@ -1124,10 +1135,13 @@
     const ns = mkNoiseSrc();
     const rough = branch(ns, 'lowpass', 170, 0.7, pn);          // offroad rumble
     const sand = branch(ns, 'highpass', 3600, 0.6, pn);         // sand hiss
-    const water = branch(ns, 'bandpass', 950, 0.9, pn);         // water wash
+    const water = branch(ns, 'bandpass', 950, 0.9, pn);         // water wash (tremolo stage sits before the level gain)
+    water.g.disconnect();
+    const wam = ctx.createGain(); wam.gain.value = 0.6;
+    water.g.connect(wam); wam.connect(pn);
     const wlfo = ctx.createOscillator(); wlfo.frequency.value = 3.1;
-    const wlg = ctx.createGain(); wlg.gain.value = 0.5;
-    wlfo.connect(wlg); wlg.connect(water.g.gain);
+    const wlg = ctx.createGain(); wlg.gain.value = 0.4;
+    wlfo.connect(wlg); wlg.connect(wam.gain);
     const ice = branch(ns, 'bandpass', 4300, 14, pn);           // ice creak
     const squealN = branch(ns, 'bandpass', 2600, 9, pn);        // tire squeal (noise)
     const sqo = ctx.createOscillator();                         // squeal tone
@@ -1143,10 +1157,11 @@
     const ho = ctx.createOscillator(); ho.type = 'sine'; ho.frequency.value = 440;
     const ho2 = ctx.createOscillator(); ho2.type = 'triangle'; ho2.frequency.value = 441.5;
     const hlfo = ctx.createOscillator(); hlfo.frequency.value = 12;
-    const hlg = ctx.createGain(); hlg.gain.value = 0.4;
+    const hlg = ctx.createGain(); hlg.gain.value = 0.3;
     const hg = ctx.createGain(); hg.gain.value = 0;
-    hlfo.connect(hlg); hlg.connect(hg.gain);
-    ho.connect(hg); ho2.connect(hg); hg.connect(pn);
+    const ham = ctx.createGain(); ham.gain.value = 0.7;
+    hlfo.connect(hlg); hlg.connect(ham.gain);
+    ho.connect(ham); ho2.connect(ham); ham.connect(hg); hg.connect(pn);
 
     [o1, o2, o3, lfo, wlfo, sqo, sqlfo, ho, ho2, hlfo].forEach((o) => o.start(t));
     ns.start(t, Math.random() * 1.0);
@@ -1177,8 +1192,8 @@
     e.o2.frequency.setTargetAtTime(f, now, 0.06);
     e.o3.frequency.setTargetAtTime(f * 0.5, now, 0.06);
     e.lp.frequency.setTargetAtTime(330 + s * 750 + (boosting ? 600 : 0), now, 0.1);
-    e.g.gain.setTargetAtTime((0.10 + s * 0.07 + (boosting ? 0.04 : 0)) * mix, now, 0.08);
-    e.rg.gain.setTargetAtTime((onRoad ? 0 : 0.10 + s * 0.12) * mix, now, 0.1);
+    e.g.gain.setTargetAtTime((0.026 + s * 0.03 + (boosting ? 0.014 : 0)) * mix, now, 0.08);
+    e.rg.gain.setTargetAtTime((onRoad ? 0 : 0.035 + s * 0.05) * mix, now, 0.1);
     engIn[i] = { s, boost: !!boosting, road: !!onRoad };
   };
 
@@ -1252,8 +1267,10 @@
       const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 1.5;
       const g = ctx.createGain(); g.gain.value = 0;
       const pn = ctx.createStereoPanner();
-      lfo.connect(lg); lg.connect(g.gain);
-      o1.connect(lp); o2.connect(lp); lp.connect(g); g.connect(pn); pn.connect(engineBus);
+      const am = ctx.createGain(); am.gain.value = 0.7;
+      lg.gain.value = 0.3;
+      lfo.connect(lg); lg.connect(am.gain);
+      o1.connect(lp); o2.connect(lp); lp.connect(am); am.connect(g); g.connect(pn); pn.connect(engineBus);
       o1.start(t); o2.start(t); lfo.start(t);
       shellV.push({ o1, o2, lp, g, pn, lfo });
     }
@@ -1273,7 +1290,7 @@
     const now = ctx.currentTime;
     if (star.next < now) star.next = now + 0.03;
     const sd = 60 / 168 / 4;
-    let guard = 12;
+    let guard = 40;
     while (star.next < now + LOOKAHEAD && guard-- > 0) {
       const st = star.step, t = star.next;
       const m = STAR_NOTES[st & 15] + (st & 32 ? 2 : 0);
@@ -1676,7 +1693,7 @@
     th.lead = th.lead || { w: th.leadWave || 'square', v: th.leadVol || 0.06 };
     th.bassI = th.bassI || { w: th.bassWave || 'triangle', v: th.bassVol || 0.15, p: th.bass || 'r...' };
     if (!th.pad && th.padVol) th.pad = { w: 'triangle', v: th.padVol, every: 16 };
-    if (!th.pad) th.pad = { w: 'strings', v: 0.02, every: th.spb };
+    if (!th.pad) th.pad = { w: 'strings', v: 0.03, every: th.spb };
     const dr = th.drums || { k: th.kick, s: th.snare, h: th.hat };
     th.dl = [];
     th.hasHat = false; th.hasSnare = false;
@@ -1952,7 +1969,7 @@
     const ch = th.chords[bar % th.chords.length];
     const tp = musicBoost ? 2 : 0;
     const base = th.tonic - 12 + tp;
-    const full = bar >= 4 && ((bar >> 2) & 1) === 1;
+    const full = (bar & 7) >= 2;          // every 8-bar cycle: 2 light intro/breakdown bars, then the full arrangement
     const phrase4 = (bar & 3) === 3;
     const ev = th.melody[step % th.melLen];
 
@@ -2011,7 +2028,7 @@
     }
 
     // chord comping stabs (offbeat), from the second bar
-    if (th.compPat && bar >= 1 && th.compPat[pos % th.compPat.length] === 'x') {
+    if (th.compPat && th.compPat[pos % th.compPat.length] === 'x') {
       const n = Math.min(ch.length, 3);
       for (let i = 0; i < n; i++) note(Ly.comp, 'pluck', base + 12 + ch[i], t, sd * 1.3, 0.024);
     }
@@ -2062,7 +2079,7 @@
     const now = ctx.currentTime;
     if (cur.nextTime < now) cur.nextTime = now + 0.05;
     const horizon = now + LOOKAHEAD;
-    let guard = 32;
+    let guard = 64;
     while (cur.nextTime < horizon && guard-- > 0) {
       const sd = stepDur(cur.th);
       const sw = (cur.step & 1) && cur.th.swing ? cur.th.swing * sd : 0;
@@ -2149,7 +2166,7 @@
 
   // ---------- ambience (persistent layers + random one-shots, chosen per course) ----------
   const amb = { want: null, cur: null, layers: null, prof: null, next: {}, live: false };
-  const AMB_BASE = { wind: 0.2, wave: 0.2, crowd: 0.14, rumble: 0.26, hum: 0.09, shimmer: 0.05, bug: 0.045 };
+  const AMB_BASE = { wind: 0.3, wave: 0.3, crowd: 0.2, rumble: 0.3, hum: 0.12, shimmer: 0.07, bug: 0.06 };
   const AMB_PROFILES = {
     meadow: { wind: 0.4, birds: 0.6, bug: 0.2 },
     beach: { wave: 0.85, wind: 0.3, gulls: 0.6, birds: 0.1 },
