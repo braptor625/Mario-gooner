@@ -1087,6 +1087,7 @@
     renderer.setScissorTest(false);
   }
 
+  const sndDir = new THREE.Vector3();
   function frame(now) {
     requestAnimationFrame(frame);
     let elapsed = (now - last) / 1000;
@@ -1117,6 +1118,14 @@
       console.error(err);
     }
     if (G.GFX && G.GFX.update) G.GFX.update(dt);
+    if (G.Sound && G.Sound.update) {
+      try { // audio listener = player 1's camera; update() drives engines / squeal / ambience / positional voices
+        const sc = views.length && Game.state !== 'attract' && views[0].camera ? views[0].camera : camera;
+        sc.getWorldDirection(sndDir);
+        G.Sound.setListener(sc.position.x, sc.position.y, sc.position.z, Math.atan2(sndDir.x, sndDir.z));
+        G.Sound.update(dt);
+      } catch (err) { console.warn('sound', err); }
+    }
     if (G.Ambience && G.Ambience.update && Game.track && Game.state !== 'ceremony') {
       camList.length = 0;
       if (views.length && Game.state !== 'attract') for (const v of views) camList.push(v.camera); else camList.push(camera);
