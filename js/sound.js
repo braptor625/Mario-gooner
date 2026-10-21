@@ -26,8 +26,8 @@
   const TICK_MS = 25;
   const MASTER_VOL = 1.0;
   const MUSIC_BASE = 1.0;
-  const MUSIC_MAKEUP = 2.8;
-  const OUT_TRIM = 0.78;
+  const MUSIC_MAKEUP = 2.2;
+  const OUT_TRIM = 0.95;
   const SFX_BASE = 1.0;
   const MAX_ENGINES = 4;
   const ENG_ACTIVE_S = 0.25;
@@ -301,6 +301,8 @@
       ambience: amb.cur || null,
       voices,
       boost: musicBoost,
+      pill: !!pill,
+      needsGesture: !!ctx && !running,
     };
   };
 
@@ -321,7 +323,7 @@
       pill.textContent = 'Click or press any key for sound';
       pill.setAttribute('role', 'status');
       pill.style.cssText = [
-        'position:fixed', 'left:50%', 'bottom:max(22px, env(safe-area-inset-bottom))', 'transform:translateX(-50%) translateY(8px)',
+        'position:fixed', 'left:50%', 'top:max(26px, env(safe-area-inset-top))', 'transform:translateX(-50%) translateY(-8px)',
         'z-index:2147483000', 'pointer-events:none', 'padding:9px 20px 10px', 'border-radius:999px',
         'font:800 15px/1.1 "Trebuchet MS","Arial Rounded MT Bold",system-ui,sans-serif', 'letter-spacing:.04em', 'color:#fff',
         'background:linear-gradient(180deg,#3aa6ff,#1769d6)', 'border:3px solid #fff',
@@ -362,18 +364,14 @@
     if (ready && running) { if (pill) hidePill(); return; }
     if (anyPadPressed()) {
       padTouched = true;
-      S.init();            // not a user activation, but costs nothing and works where the page was already activated
-      if (!running) pillWanted = true;
+      S.init();            // a pad press is not a user activation, but it costs nothing and works where the page was already activated
     }
     if (ready && ctx && ctx.state !== 'running') resumeCtx();
+    // a controller is in use but the browser still blocks audio -> tell the player how to enable it
+    if (padTouched && !running) pillWanted = true;
     if (pillWanted && !running && !pill) showPill();
-    // in a race with no sound for a while, hint as well
-    try {
-      const gs = G.Game && G.Game.state;
-      if (!running && (gs === 'countdown' || gs === 'race') && padTouched) pillWanted = true;
-    } catch (e) { /* ignore */ }
-  }, 250);
-  window.addEventListener('gamepadconnected', () => { padTouched = true; });
+  }, 120);
+  window.addEventListener('gamepadconnected', () => { padTouched = true; S.init(); });
 
   // ---------- spatial helpers ----------
   S.setListener = function (x, y, z, heading) {
@@ -2166,7 +2164,7 @@
 
   // ---------- ambience (persistent layers + random one-shots, chosen per course) ----------
   const amb = { want: null, cur: null, layers: null, prof: null, next: {}, live: false };
-  const AMB_BASE = { wind: 0.3, wave: 0.3, crowd: 0.2, rumble: 0.3, hum: 0.12, shimmer: 0.07, bug: 0.06 };
+  const AMB_BASE = { wind: 0.22, wave: 0.3, crowd: 0.2, rumble: 0.1, hum: 0.04, shimmer: 0.07, bug: 0.12 };
   const AMB_PROFILES = {
     meadow: { wind: 0.4, birds: 0.6, bug: 0.2 },
     beach: { wave: 0.85, wind: 0.3, gulls: 0.6, birds: 0.1 },
@@ -2467,8 +2465,8 @@
       const lvl = drifting ? clamp(k.driftLevel | 0, 0, 3) : 0;
       const grip = drifting && surf !== 'sand' && surf !== 'mud' && surf !== 'water';
       const sq = grip ? Math.min(1, spd / 18) : 0;
-      e.sqg.gain.setTargetAtTime(sq * 0.075, now, 0.05);
-      e.sqn.gain.setTargetAtTime(sq * 0.05, now, 0.05);
+      e.sqg.gain.setTargetAtTime(sq * 0.03, now, 0.05);
+      e.sqn.gain.setTargetAtTime(sq * 0.022, now, 0.05);
       if (grip) {
         e.sqo.frequency.setTargetAtTime(1100 + spd * 12 + lvl * 90, now, 0.1);
         e.sqbp.frequency.setTargetAtTime(2100 + spd * 14, now, 0.1);
@@ -2479,7 +2477,7 @@
         e.ho2.frequency.setTargetAtTime(hf * 1.004, now, 0.02);
         e.hlfo.frequency.setTargetAtTime(8 + lvl * 4, now, 0.05);
       }
-      e.hg.gain.setTargetAtTime(hf ? 0.012 + lvl * 0.005 : 0, now, 0.04);
+      e.hg.gain.setTargetAtTime(hf ? 0.007 + lvl * 0.003 : 0, now, 0.04);
       if (lvl > e.lvl && lvl >= 1) { S.play('charge', { volume: 0.7 + lvl * 0.15, pitch: 1 + (lvl - 1) * 0.2 }); }
       if (lvl > 0) { S._driftPeak = Math.max(S._driftPeak || 1, lvl); driftPeakT = 0; }
       e.lvl = lvl;
