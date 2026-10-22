@@ -47,3 +47,6 @@ See `ARCHITECTURE.md` for the module contracts:
 - `js/track.js`, `js/kart.js`, `js/items.js`, `js/ai.js`, `js/characters.js` build the game world, karts, items, opponents and characters.
 - `js/ui.js` and `css/style.css` are the menus and HUD.
 - `js/sound.js` and `js/input.js` handle audio and controls.
+
+## Single-file build
+`dist/turbo-tandem.html` is the whole game in one self-contained file (Three.js, all scripts and CSS inlined, ~2.2 MB). Upload it to any static host (GitHub Pages, Netlify, itch.io, your own server) or open it directly in a browser. Only the Google Fonts stylesheet is loaded from the web; without internet the menus fall back to system fonts. Rebuild after changes with the inline script in the commit that added it, or by inlining each `<script src>` and the stylesheet from `index.html`.
